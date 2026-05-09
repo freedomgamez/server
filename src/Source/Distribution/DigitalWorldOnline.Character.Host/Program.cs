@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Application.Admin.Repositories;
 using DigitalWorldOnline.Application.CharacterAssets;
+using DigitalWorldOnline.Application.CharacterAssets.Bins;
 using DigitalWorldOnline.Application.CharacterAssets.Mapping;
 using DigitalWorldOnline.Application.Extensions;
 using DigitalWorldOnline.Application.Services;
@@ -47,7 +48,7 @@ namespace DigitalWorldOnline.Character
             AppDomain.CurrentDomain.UnhandledException += UnhandledExceptionHandler;
             Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
 
-            return Host.CreateDefaultBuilder(args)
+            var host = Host.CreateDefaultBuilder(args)
                 .UseSerilog()
                 .UseEnvironment("Development")
                 .ConfigureServices((context, services) =>
@@ -77,6 +78,12 @@ namespace DigitalWorldOnline.Character
                     services.AddSingleton<IProcessor, CharacterPacketProcessor>();
                     services.AddSingleton(ConfigureLogger(context.Configuration));
 
+                    // Static-data bin loaders (loaded eagerly below after Build())
+                    services.AddSingleton<CharCreateTableBinLoader>();
+                    services.AddSingleton<DMBaseBinLoader>();
+                    services.AddSingleton<DigimonListBinLoader>();
+                    services.AddSingleton<DigimonEvoBinLoader>();
+
                     services.AddHostedService<CharacterServer>();
                     services.AddMediatR(
                         typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly,
@@ -98,6 +105,39 @@ namespace DigitalWorldOnline.Character
                     hostConfig.AddEnvironmentVariables("DSO_");
                 })
                 .Build();
+
+            // Eagerly load static-data bins so a missing/corrupt file fails fast at boot
+            // rather than mid-flight when a packet handler first asks for it. CharCreateTable
+            // loads first because Digimon_List depends on its enabled-starter set to filter.
+            var charCreateTable = host.Services.GetRequiredService<CharCreateTableBinLoader>().Load();
+            var dmBase = host.Services.GetRequiredService<DMBaseBinLoader>().Load();
+
+            // Only the 4 client-selectable starters are ever queried at character creation,
+            // so the digimon-keyed bins (Digimon_List, DigimonEvo) are filtered to that set
+            // at load time. Same hash set is reused for both.
+            var starterTypeFilter = charCreateTable.Digimon
+                .Where(d => d.Enable)
+                .Select(d => d.Model)
+                .ToHashSet();
+            var digimonList = host.Services.GetRequiredService<DigimonListBinLoader>().Load(starterTypeFilter);
+            var digimonEvo = host.Services.GetRequiredService<DigimonEvoBinLoader>().Load(starterTypeFilter);
+
+            var serilog = host.Services.GetRequiredService<ILogger>();
+            serilog.Information(
+                "Loaded CharCreateTable.bin: {TamerEnabled}/{TamerCount} tamers selectable, {DigimonEnabled}/{DigimonCount} digimon selectable",
+                charCreateTable.Tamers.Count(t => t.Enable), charCreateTable.Tamers.Count,
+                charCreateTable.Digimon.Count(d => d.Enable), charCreateTable.Digimon.Count);
+            serilog.Information(
+                "Loaded DMBase.bin (sec 1, level=1 only): {TamerStats} tamer stat rows",
+                dmBase.TamerStats.Count);
+            serilog.Information(
+                "Loaded Digimon_List.bin (filtered to selectable starters): {Count} digimon entries",
+                digimonList.ByType.Count);
+            serilog.Information(
+                "Loaded DigimonEvo.bin (filtered to selectable starters): {Count} evolution trees, {Lines} total evolution lines",
+                digimonEvo.ByType.Count, digimonEvo.ByType.Values.Sum(e => e.Lines.Count));
+
+            return host;
         }
 
         private static ILogger ConfigureLogger(IConfiguration configuration)

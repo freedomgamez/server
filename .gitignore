@@ -397,16 +397,12 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 /.idea/.idea.DigitalWorldOnline/.idea
-
-# Local environment config — copy from *.Example.json and fill in real values
-appsettings.Development.json
-
-# Generated logs
-logs/
-_runlogs/
-
-# Editor / OS
-.vs/
+/Bins/
+src/Tools/NPCEditor/Util/pack03.pf
 .idea/
-*.swp
-.DS_Store
+*.pf
+*.hf
+MARIADB_MIGRATION_PLAN.md
+HOST_SPLIT_PLAN.md
+src/Tools/Discord/
+src/Tools/DataImporter/XMLs/

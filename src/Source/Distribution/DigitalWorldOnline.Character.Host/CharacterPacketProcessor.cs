@@ -3,6 +3,7 @@ using DigitalWorldOnline.Application.Separar.Commands.Create;
 using DigitalWorldOnline.Application.Separar.Commands.Delete;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
+using DigitalWorldOnline.Application.CharacterAssets.Bins;
 using DigitalWorldOnline.Application.CharacterAssets.Queries;
 using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums;
@@ -28,6 +29,7 @@ namespace DigitalWorldOnline.Character
         private readonly ISender _sender;
         private readonly ILogger _logger;
         private readonly IMapper _mapper;
+        private readonly CharCreateTableBinLoader _charCreateTable;
 
         private const string GameServerAddress = "GameServer:Address";
         private const string GamerServerPublic = "GameServer:PublicAddress";
@@ -38,12 +40,14 @@ namespace DigitalWorldOnline.Character
         public CharacterPacketProcessor(ILogger logger,
             ISender sender,
             IConfiguration configuration,
-            IMapper mapper)
+            IMapper mapper,
+            CharCreateTableBinLoader charCreateTable)
         {
             _configuration = configuration;
             _sender = sender;
             _logger = logger;
             _mapper = mapper;
+            _charCreateTable = charCreateTable;
         }
 
         /// <summary>
@@ -108,6 +112,26 @@ namespace DigitalWorldOnline.Character
                         packet.Seek(42);
                         var digimonModel = packet.ReadInt();
                         var digimonName = packet.ReadZString();
+
+                        // Validate against CharCreateTable.bin. The client UI shows entries with
+                        // bShow=true but only lets the player actually pick entries with
+                        // bEnable=true. In v487 that's 4-of-12 tamers (Marcus/Touma/Yoshi/Ikuto)
+                        // and 4-of-86 digimon (Agumon/Lalamon/Gaomon/Falcomon). Anything else
+                        // is a desynced client or a tampered packet — refuse.
+                        var ccTable = _charCreateTable.Data;
+                        var tamerEntry = ccTable.FindTamer(tamerModel);
+                        var digimonEntry = ccTable.FindStarterDigimon(digimonModel);
+                        if (tamerEntry is not { Enable: true } || digimonEntry is not { Enable: true })
+                        {
+                            _logger.Warning(
+                                "Rejecting CreateCharacter from account {Account}: " +
+                                "tamerModel={TamerModel} (known={TamerKnown}, enable={TamerEnable}), " +
+                                "digimonModel={DigimonModel} (known={DigimonKnown}, enable={DigimonEnable})",
+                                client.AccountId,
+                                tamerModel, tamerEntry != null, tamerEntry?.Enable,
+                                digimonModel, digimonEntry != null, digimonEntry?.Enable);
+                            break;
+                        }
 
                         DebugLog($"Searching account with id {client.AccountId}...");
                         var account = _mapper.Map<AccountModel>(await _sender.Send(new AccountByIdQuery(client.AccountId)));
