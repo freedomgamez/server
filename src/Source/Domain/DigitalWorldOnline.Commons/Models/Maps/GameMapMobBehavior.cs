@@ -381,7 +381,18 @@ namespace DigitalWorldOnline.Commons.Models.Map
                                 // TODO: Fornecer tempo de espera da skill.
 
                                 BroadcastForTargetTamers(mob.TamersViewing, new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
-                                BroadcastForTargetTamers(mob.TamersViewing, new MonsterSkillDamagePacket(mob.GeneralHandler, targetSkill.SkillId, finalDamage, targetTamers).Serialize());
+
+                                // Per-target damage via pSkill::ApplyAround (1102) — the v487 client
+                                // route for "hitter applies skill to target". The previous code sent
+                                // a single MonsterSkillDamagePacket (16011) which v487 routes to
+                                // RecvRaidChainSkill (Qinglongmon chain-lightning visual) — wrong shape,
+                                // dropped. Server-side HP was decrementing but client showed no damage.
+                                foreach (var hitTarget in targetTamers)
+                                {
+                                    var hpRate = (byte)((long)hitTarget.Partner.CurrentHp * 255L / Math.Max(1, hitTarget.Partner.HP));
+                                    BroadcastForTargetTamers(mob.TamersViewing, new SkillHitPacket(
+                                        mob.GeneralHandler, hitTarget.Partner.GeneralHandler, 0, finalDamage, hpRate).Serialize());
+                                }
 
                                 Task.Run(() =>
                                 {
@@ -454,7 +465,18 @@ namespace DigitalWorldOnline.Commons.Models.Map
                                 // TODO: Fornecer tempo de espera da skill.
 
                                 BroadcastForTargetTamers(mob.TamersViewing, new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
-                                BroadcastForTargetTamers(mob.TamersViewing, new MonsterSkillDamagePacket(mob.GeneralHandler, targetSkill.SkillId, finalDamage, targetTamers).Serialize());
+
+                                // Per-target damage via pSkill::ApplyAround (1102) — the v487 client
+                                // route for "hitter applies skill to target". The previous code sent
+                                // a single MonsterSkillDamagePacket (16011) which v487 routes to
+                                // RecvRaidChainSkill (Qinglongmon chain-lightning visual) — wrong shape,
+                                // dropped. Server-side HP was decrementing but client showed no damage.
+                                foreach (var hitTarget in targetTamers)
+                                {
+                                    var hpRate = (byte)((long)hitTarget.Partner.CurrentHp * 255L / Math.Max(1, hitTarget.Partner.HP));
+                                    BroadcastForTargetTamers(mob.TamersViewing, new SkillHitPacket(
+                                        mob.GeneralHandler, hitTarget.Partner.GeneralHandler, 0, finalDamage, hpRate).Serialize());
+                                }
 
                                 Task.Run(() =>
                                 {

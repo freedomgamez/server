@@ -163,14 +163,13 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                                 }
                             });
 
-                            _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                client.TamerId,
-                                new CastSkillPacket(
-                                    skillSlot,
-                                    attackerHandler,
-                                    targetHandler
-                                ).Serialize()
-                            );
+                            // pGame::Skill (1015) is a "pre-cast lock-on" packet from a
+                            // post-v487 client build. v487's RecvSkill is stubbed
+                            // assert(false). The cast animation + damage display are both
+                            // driven by the next packet (AreaSkillPacket=1116 or
+                            // SkillHitPacket=1102) which carry the hitter UID + skill index;
+                            // v487's _RecvDigimonSkill_ApplyAround / _RecvSkillApplyAround_
+                            // ExistHitter calls SetSkillInfo() to render cast + damage atomically.
 
                             _dungeonServer.BroadcastForTamerViewsAndSelf(
                                 client.TamerId,
@@ -210,12 +209,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             {
                                 _logger.Verbose($"Partner {client.Partner.Id} inflicted {finalDmg} damage with skill {skill.SkillId} in mob {targetMob?.Id} - {targetMob?.Name}.");
 
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new CastSkillPacket(
-                                        skillSlot,
-                                        attackerHandler,
-                                        targetHandler).Serialize());
+                                // pGame::Skill (1015) skipped for v487 — see comment above.
 
                                 _dungeonServer.BroadcastForTamerViewsAndSelf(
                                     client.TamerId,
@@ -368,14 +362,13 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                                 }
                             });
 
-                            _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                client.TamerId,
-                                new CastSkillPacket(
-                                    skillSlot,
-                                    attackerHandler,
-                                    targetHandler
-                                ).Serialize()
-                            );
+                            // pGame::Skill (1015) is a "pre-cast lock-on" packet from a
+                            // post-v487 client build. v487's RecvSkill is stubbed
+                            // assert(false). The cast animation + damage display are both
+                            // driven by the next packet (AreaSkillPacket=1116 or
+                            // SkillHitPacket=1102) which carry the hitter UID + skill index;
+                            // v487's _RecvDigimonSkill_ApplyAround / _RecvSkillApplyAround_
+                            // ExistHitter calls SetSkillInfo() to render cast + damage atomically.
 
                             _dungeonServer.BroadcastForTamerViewsAndSelf(
                                 client.TamerId,
@@ -418,12 +411,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             {
                                 _logger.Verbose($"Partner {client.Partner.Id} inflicted {finalDmg} damage with skill {skill.SkillId} in mob {targetMob?.Id} - {targetMob?.Name}.");
 
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new CastSkillPacket(
-                                        skillSlot,
-                                        attackerHandler,
-                                        targetHandler).Serialize());
+                                // pGame::Skill (1015) skipped for v487 — see comment above.
 
                                 _dungeonServer.BroadcastForTamerViewsAndSelf(
                                     client.TamerId,
@@ -578,14 +566,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                                 }
                             });
 
-                            _mapServer.BroadcastForTamerViewsAndSelf(
-                                client.TamerId,
-                                new CastSkillPacket(
-                                    skillSlot,
-                                    attackerHandler,
-                                    targetHandler
-                                ).Serialize()
-                            );
+                            // pGame::Skill (1015) skipped for v487 — see comment above.
 
                             _mapServer.BroadcastForTamerViewsAndSelf(
                                 client.TamerId,
@@ -630,12 +611,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             {
                                 _logger.Verbose($"Partner {client.Partner.Id} inflicted {finalDmg} damage with skill {skill.SkillId} in mob {targetMob?.Id} - {targetMob?.Name}.");
 
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new CastSkillPacket(
-                                        skillSlot,
-                                        attackerHandler,
-                                        targetHandler).Serialize());
+                                // pGame::Skill (1015) skipped for v487 — see comment above.
 
                                 _mapServer.BroadcastForTamerViewsAndSelf(
                                     client.TamerId,
@@ -787,14 +763,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                                 }
                             });
 
-                            _mapServer.BroadcastForTamerViewsAndSelf(
-                                client.TamerId,
-                                new CastSkillPacket(
-                                    skillSlot,
-                                    attackerHandler,
-                                    targetHandler
-                                ).Serialize()
-                            );
+                            // pGame::Skill (1015) skipped for v487 — see comment above.
 
                             _mapServer.BroadcastForTamerViewsAndSelf(
                                 client.TamerId,
@@ -837,12 +806,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             {
                                 _logger.Verbose($"Partner {client.Partner.Id} inflicted {finalDmg} damage with skill {skill.SkillId} in mob {targetMob?.Id} - {targetMob?.Name}.");
 
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new CastSkillPacket(
-                                        skillSlot,
-                                        attackerHandler,
-                                        targetHandler).Serialize());
+                                // pGame::Skill (1015) skipped for v487 — see comment above.
 
                                 _mapServer.BroadcastForTamerViewsAndSelf(
                                     client.TamerId,

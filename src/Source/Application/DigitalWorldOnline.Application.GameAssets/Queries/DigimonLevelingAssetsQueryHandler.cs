@@ -39,7 +39,11 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
                     // (player loading screen stuck after character select).
                     StatusId = rec.Id,
                     Level = (byte)rec.Level,
-                    ExpValue = rec.Exp,
+                    // Bin's ExpValue is in WIRE units (100× the real threshold) — same
+                    // convention as TamerLevelingAssetsQueryHandler. Divide here so the
+                    // server's level-up comparison against `digimon.CurrentExperience`
+                    // (stored real-units) matches DB-era behavior.
+                    ExpValue = rec.Exp / 100,
                     HPValue = rec.HP,
                     DSValue = rec.DS,
                     MSValue = rec.MoveSpeed,

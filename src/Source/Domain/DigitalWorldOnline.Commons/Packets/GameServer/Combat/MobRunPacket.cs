@@ -4,6 +4,11 @@ using DigitalWorldOnline.Commons.Writers;
 
 namespace DigitalWorldOnline.Commons.Packets.GameServer.Combat
 {
+    /// <summary>
+    /// pGame::Sync (1006) sub-packet pSync::Move (subtype 6). v487 client's
+    /// <c>SyncMoveObject</c> dispatched via legacy <c>GetClass(u2)</c> — broken for
+    /// nClass ≥ 4. Patched on the client to use <c>type.m_nClass</c>.
+    /// </summary>
     public class MobRunPacket : PacketWriter
     {
         private const int PacketNumber = 1006;

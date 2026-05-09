@@ -1,10 +1,12 @@
 ﻿using AutoMapper;
 using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.Separar.Commands.Create;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
 using DigitalWorldOnline.Application.GameAssets.Queries;
 using DigitalWorldOnline.Commons.Entities;
+using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Enums.Character;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Enums.PacketProcessor;
@@ -86,6 +88,32 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
 
             account.ItemList.ForEach(character.AddItemList);
+
+            // Backfill the four standard account-level ItemLists for legacy accounts
+            // (created before AccountModel.Create wired them up). For each missing type:
+            // 1. Persist a Shared_ItemList row (idempotent via EnsureAccountItemListAsync —
+            //    no-op if the row already exists from a prior session).
+            // 2. Add the in-memory model so the current ComplementarInformation handler
+            //    can use it without crashing on null.
+            //
+            // Without this, ComplementarInformationPacketProcessor's LoadInventoryPacket
+            // call hits a null AccountWarehouse, throws NRE inside ProcessPacketAsync
+            // (which OnDataReceivedEvent fires-and-forgets, swallowing the exception),
+            // the handler aborts mid-flight and the character never transitions to
+            // CharacterStateEnum.Ready — leaving them invisible to MonsterOperation, so
+            // no mobs ever spawn for the player.
+            async Task EnsureListAsync(ItemListEnum t)
+            {
+                if (character.ItemList.Any(x => x.Type == t)) return;
+                _logger.Information("Account {AccountId} missing ItemList type {Type}; backfilling row + in-memory model.",
+                    account.Id, t);
+                await _sender.Send(new CreateAccountItemListCommand(account.Id, t));
+                character.AddItemList(new ItemListModel(t));
+            }
+            await EnsureListAsync(ItemListEnum.AccountWarehouse);
+            await EnsureListAsync(ItemListEnum.CashWarehouse);
+            await EnsureListAsync(ItemListEnum.ShopWarehouse);
+            await EnsureListAsync(ItemListEnum.BuyHistory);
 
             foreach (var digimon in character.Digimons)
             {

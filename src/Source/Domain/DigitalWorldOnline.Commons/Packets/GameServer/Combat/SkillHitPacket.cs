@@ -16,18 +16,28 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer.Combat
         /// <param name="targetCurrentHpRate">The final hp rate of the target</param>
         public SkillHitPacket(int attackerHandler, int targetHandler, byte skillSlot, int finalDamage, byte targetCurrentHpRate)
         {
+            // pSkill::ApplyAround (1102) → _RecvSkillApplyAround_ExistHitter
+            // (cCliGameSkill.cpp:924). v487 wire format:
+            //   u1 bIsItem            (0 = skill, not item)
+            //   u4 nHitterUID, u4 nTargetUID, u4 nSkillArrIDX
+            //   u1 nHitterHpRate, u1 nTargetHpRate
+            //   [hitter attribute loop] u1 nP — terminates when nP >= MaxExtStat (=18)
+            //   [target attribute loop] u1 nP, n4 nV; repeated until u1 nP >= 18
+            //   u4 nBattleOption
+            // Pre-fix code wrote WriteByte(0) for nBattleOption (1 byte) where client reads 4 →
+            // buffer underrun corrupting the next packet. Fixed to WriteInt(0).
             Type(PacketNumber);
-            WriteByte(0);
-            WriteInt(attackerHandler);
-            WriteInt(targetHandler);
-            WriteInt(skillSlot);
-            WriteByte(255); //Max HP Rate?
-            WriteByte(targetCurrentHpRate);
-            WriteByte(18); //MaxExtStat
-            WriteByte(4); //HP TODO: afetar outros status
-            WriteInt(finalDamage * -1);
-            WriteByte(255); //Max HP Rate?
-            WriteByte(0);
+            WriteByte(0);                          // bIsItem = 0 (skill)
+            WriteInt(attackerHandler);             // u4 nHitterUID
+            WriteInt(targetHandler);               // u4 nTargetUID
+            WriteInt(skillSlot);                   // u4 nSkillArrIDX
+            WriteByte(255);                        // u1 nHitterHpRate (max)
+            WriteByte(targetCurrentHpRate);        // u1 nTargetHpRate
+            WriteByte(18);                         // hitter loop sentinel (MaxExtStat=18 terminates)
+            WriteByte(4);                          // target loop: nP=4 (HP attribute)
+            WriteInt(finalDamage * -1);            // n4 nV (damage)
+            WriteByte(255);                        // target loop sentinel
+            WriteInt(0);                           // u4 nBattleOption  (was WriteByte — underrun)
         }
     }
 }

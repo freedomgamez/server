@@ -44,4 +44,14 @@ public sealed record DigimonEvoLine(
     ushort OpenLevel,
     ushort OpenQuest,
     ushort UseItem,
-    ushort UseItemNum);
+    ushort UseItemNum,
+    IReadOnlyList<DigimonEvoStage> Stages);
+
+/// <summary>
+/// One outgoing evolution target on a form's <c>m_nEvolutionList[9]</c>. The client's
+/// QuickEvol UI iterates this list by position (0..8) — when the player clicks slot
+/// <c>i</c>, the client sends <c>SendEvolution(uid, i)</c> and the server uses <c>i</c>
+/// as the index into this same list to resolve the target form. Empty entries
+/// (<c>nSlot == INVAIDE</c>, sentinel) keep the index alignment.
+/// </summary>
+public sealed record DigimonEvoStage(int Slot, int TargetType);

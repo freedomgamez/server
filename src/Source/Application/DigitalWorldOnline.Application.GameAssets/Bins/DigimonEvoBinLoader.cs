@@ -17,7 +17,8 @@ namespace DigitalWorldOnline.Application.GameAssets.Bins;
 ///   0    DWORD  m_dwID
 ///   4    USHORT m_nEvoSlot
 ///   6    USHORT pad
-///   8    SEvolutionInfo[9]    (72 bytes — not consumed; each target appears as its own evolveObj)
+///   8    SEvolutionInfo[9]    (72 bytes — outgoing evolution targets indexed by UI slot; client
+///                              QuickEvol passes the index back as <c>nEvoIndex</c> on click)
 ///   88   USHORT m_nEnableSlot
 ///   90   USHORT m_nOpenQualification
 ///   92   USHORT m_nOpenLevel
@@ -82,12 +83,21 @@ public sealed class DigimonEvoBinLoader
     {
         uint type = BitConverter.ToUInt32(rec[0..4]);
         ushort evoSlot = BitConverter.ToUInt16(rec[4..6]);
+        // 8..80 = SEvolutionInfo[9] — outgoing evolution targets indexed by UI slot.
+        var stages = new DigimonEvoStage[9];
+        for (int i = 0; i < 9; i++)
+        {
+            int o = 8 + i * 8;
+            int slot = BitConverter.ToInt32(rec[o..(o + 4)]);
+            int target = BitConverter.ToInt32(rec[(o + 4)..(o + 8)]);
+            stages[i] = new DigimonEvoStage(slot, target);
+        }
         ushort enableSlot = BitConverter.ToUInt16(rec[88..90]);
         ushort openQualification = BitConverter.ToUInt16(rec[90..92]);
         ushort openLevel = BitConverter.ToUInt16(rec[92..94]);
         ushort openQuest = BitConverter.ToUInt16(rec[94..96]);
         ushort useItem = BitConverter.ToUInt16(rec[100..102]);
         ushort useItemNum = BitConverter.ToUInt16(rec[102..104]);
-        return new DigimonEvoLine((int)type, evoSlot, enableSlot, openQualification, openLevel, openQuest, useItem, useItemNum);
+        return new DigimonEvoLine((int)type, evoSlot, enableSlot, openQualification, openLevel, openQuest, useItem, useItemNum, stages);
     }
 }

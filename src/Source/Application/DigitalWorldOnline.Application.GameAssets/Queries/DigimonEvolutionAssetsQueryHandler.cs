@@ -49,7 +49,10 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
                         UnlockQuestId = (short)line.OpenQuest,
                         UnlockItemSection = line.UseItem,
                         UnlockItemSectionAmount = line.UseItemNum,
-                        SkillMaxLevels = ResolveSkillMaxLevels(line.Type)
+                        SkillMaxLevels = ResolveSkillMaxLevels(line.Type),
+                        Stages = line.Stages
+                            .Select(s => new EvolutionStageAssetDTO { Type = s.TargetType, Value = s.Slot })
+                            .ToList()
                     });
                 }
 

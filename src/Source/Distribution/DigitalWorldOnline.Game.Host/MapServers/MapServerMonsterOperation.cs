@@ -35,6 +35,13 @@ namespace DigitalWorldOnline.GameHost
 
             map.UpdateMapMobs();
 
+            // Per-tamer batches: when multiple mobs become visible to the same tamer in the
+            // same cycle (typical on map enter), batch them into a single LoadMobsPacket
+            // instead of one packet per mob. v487 SyncInObject loops `cnt` entries within
+            // one packet, so this is just better packing — same wire format per entry.
+            // LoadBuffsPacket stays per-mob (buffs are infrequent and need their own subtype).
+            Dictionary<long, List<MobConfigModel>>? tamersToNotify = null;
+
             foreach (var mob in map.Mobs)
             {
                 if (!mob.AwaitingKillSpawn && DateTime.Now > mob.ViewCheckTime)
@@ -56,9 +63,17 @@ namespace DigitalWorldOnline.GameHost
                             {
                                 mob.TamersViewing.Add(nearTamer);
 
-                                var targetClient = map.Clients.FirstOrDefault(x => x.TamerId == nearTamer);
+                                tamersToNotify ??= new Dictionary<long, List<MobConfigModel>>();
+                                if (!tamersToNotify.TryGetValue(nearTamer, out var list))
+                                {
+                                    list = new List<MobConfigModel>();
+                                    tamersToNotify[nearTamer] = list;
+                                }
+                                list.Add(mob);
 
-                                targetClient?.Send(new LoadMobsPacket(mob));
+                                // Buffs sent per-mob (separate Sync subtype 16, doesn't batch
+                                // with LoadMobs subtype 3 in the same packet).
+                                var targetClient = map.Clients.FirstOrDefault(x => x.TamerId == nearTamer);
                                 targetClient?.Send(new LoadBuffsPacket(mob));
                             }
                         });
@@ -84,6 +99,17 @@ namespace DigitalWorldOnline.GameHost
                 MobsOperation(map, mob);
 
                 mob.SetNextAction();
+            }
+
+            // Flush per-tamer batches as ONE LoadMobsPacket containing all newly-visible
+            // mobs for that tamer this cycle.
+            if (tamersToNotify != null)
+            {
+                foreach (var kv in tamersToNotify)
+                {
+                    var targetClient = map.Clients.FirstOrDefault(c => c.TamerId == kv.Key);
+                    targetClient?.Send(new LoadMobsPacket(kv.Value));
+                }
             }
 
             map.UpdateMapMobs(true);

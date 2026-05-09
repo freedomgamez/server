@@ -1,11 +1,14 @@
 ﻿using AutoMapper;
 using DigitalWorldOnline.Commons.DTOs.Account;
+using DigitalWorldOnline.Commons.DTOs.Base;
 using DigitalWorldOnline.Commons.DTOs.Character;
 using DigitalWorldOnline.Commons.DTOs.Config;
 using DigitalWorldOnline.Commons.Enums;
+using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Extensions;
 using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Models.Account;
+using DigitalWorldOnline.Commons.Models.Base;
 using DigitalWorldOnline.Commons.Models.Config;
 using DigitalWorldOnline.Commons.Models.Security;
 using Microsoft.EntityFrameworkCore;
@@ -32,6 +35,53 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Account
 
             return dto;
         }
+
+        /// <summary>
+        /// Backfills a missing account-level ItemList row for legacy accounts. Idempotent —
+        /// no-op if a row of <paramref name="type"/> already exists for the account. Used
+        /// during login to repair accounts created before <c>AccountModel.Create</c>
+        /// standardized the four account-level lists (AccountWarehouse, CashWarehouse,
+        /// ShopWarehouse, BuyHistory). Without this row, the lookup hits null in
+        /// <c>ComplementarInformationPacketProcessor</c>'s LoadInventoryPacket call and
+        /// silently aborts the handler, leaving the player stuck in Connected state.
+        /// </summary>
+        public async Task EnsureAccountItemListAsync(long accountId, ItemListEnum type)
+        {
+            var account = await _context.Account
+                .Include(x => x.ItemList)
+                .FirstOrDefaultAsync(x => x.Id == accountId);
+
+            if (account == null)
+                return;
+
+            if (account.ItemList.Any(x => x.Type == type))
+                return; // already present, nothing to do
+
+            // Match the runtime's in-memory size convention so a fresh DB row maps cleanly
+            // back to an ItemListModel of the same Size on next login.
+            byte size = ItemListModel.BinDrivenDefaults.TryGetValue(type, out var bin)
+                ? bin
+                : DefaultSizeFor(type);
+
+            account.ItemList.Add(new ItemListDTO
+            {
+                Type = type,
+                Size = size,
+                Bits = 0,
+                Items = new List<ItemDTO>(),
+            });
+
+            await _context.SaveChangesAsync();
+        }
+
+        private static byte DefaultSizeFor(ItemListEnum type) => type switch
+        {
+            ItemListEnum.AccountWarehouse => (byte)GeneralSizeEnum.InitialAccountWarehouse,
+            ItemListEnum.CashWarehouse    => (byte)GeneralSizeEnum.CashWarehouse,
+            ItemListEnum.ShopWarehouse    => (byte)GeneralSizeEnum.ShopWarehouse,
+            ItemListEnum.BuyHistory       => (byte)GeneralSizeEnum.CashShopBuyHistory,
+            _                             => 0,
+        };
 
         public async Task<LoginTryDTO> AddLoginTryAsync(LoginTryModel loginTry)
         {

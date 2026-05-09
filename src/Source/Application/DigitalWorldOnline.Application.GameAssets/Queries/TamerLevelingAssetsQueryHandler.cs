@@ -30,7 +30,15 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
                 {
                     Type = (CharacterModelEnum)tamerModel,
                     Level = (byte)rec.Level,
-                    ExpValue = rec.Exp,
+                    // Bin's ExpValue is in WIRE units (100× the real threshold). The v487
+                    // client multiplies by 0.01 when reading (FmTamer.cpp:169 —
+                    // `s_dwExp * 0.01f`), so its on-screen threshold = bin_value / 100. The
+                    // server's level-up comparison runs against `tamer.CurrentExperience`
+                    // which is stored in real units in the DB (and is what the OLD pre-bin
+                    // path compared against the DB's already-divided Asset_CharacterLevelStatus
+                    // value). Without /100 here, the server compares e.g. 8010 < 13500 and
+                    // never levels up while the client UI shows 5xxx% complete (8010 / 135).
+                    ExpValue = rec.Exp / 100,
                     HPValue = rec.HP,
                     DSValue = rec.DS,
                     MSValue = rec.MoveSpeed,

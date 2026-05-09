@@ -49,7 +49,21 @@ namespace DigitalWorldOnline.Game
 
                         if (processor != null)
                         {
-                            await processor.Process(client, data);
+                            try
+                            {
+                                await processor.Process(client, data);
+                            }
+                            catch (Exception ex)
+                            {
+                                // ProcessPacketAsync is invoked fire-and-forget from
+                                // GameServer.OnDataReceivedEvent (no await), so async
+                                // exceptions thrown by handlers would otherwise be swallowed
+                                // entirely (TaskScheduler unobserved). Log here so silent
+                                // handler failures don't go invisible.
+                                _logger.Error(ex,
+                                    "Packet handler {Handler} ({PacketType}) threw for tamer {TamerId}: {Msg}",
+                                    processor.GetType().Name, packet.Type, client.TamerId, ex.Message);
+                            }
                         }
                         else
                         {

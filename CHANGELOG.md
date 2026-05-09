@@ -2,6 +2,52 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Mob packets: v487 wire format alignment + per-tamer batching
+
+Mobs were not rendering in-game. Three layered bugs in the LoadMobsPacket / sync pipeline plus a client-side dispatch truncation. Net effect after the fixes: mobs spawn, walk, run, take damage, die, drop loot.
+
+- **`LoadMobsPacket` per-mob payload** — rewritten to match v487's `SyncInMonster` exactly. Per mob: `nSync::Pos pos (8B)`, `cType (8B = handler u4 + type u4)`, `DstPos (8B)`, `u1 nHpRate`, **`u1 nLevel`** (was `Short` — overran the next field), **`u4 nMonSkill_Idx`** (was `Short` — undersized), `int nStack`, `u4 nCondition`, **`u4 nCnt = 0`** (was missing — without this seed the client's "is this a known mob?" map check fell through). Added a shared `WriteMobEntry` helper to keep all three ctors in lockstep.
+- **`MobWalkPacket` / `MobRunPacket` / `UnloadMobsPacket` / `DestroyMobsPacket`** — fixed per-packet wire-format bugs found by tracing the v487 client `Recv*` dispatcher: `cType` written as `WriteUInt(8B)` everywhere (the client's `GetClass(u2)` read truncates `nClass ≥ 4` otherwise; companion patch in client `cCliGameSync.cpp` switches the four `SyncOutObject/SyncDelete/SyncMove/SyncWalk` dispatchers to `type.m_nClass` instead of `GetClass(nUID)`). `DestroyMobsPacket` got the missing trailing `WriteInt(0)` `cSyncType` terminator.
+- **Per-tamer batching in `MapServerMonsterOperation`** — newly-visible mobs are now collected per tamer per cycle (`tamersToNotify` dict) and flushed as one `LoadMobsPacket` per tamer instead of one packet per mob. Cuts a packet-flood at zone entry that was overwhelming the client's per-frame load.
+
+## Skill packets: v487 RecvSkill is gutted, follow-up packet carries everything
+
+Tracing the v487 client showed `pGame::Skill (1015)`'s `RecvSkill` is an `assert_cs(false)` stub; the actual cast + damage flow is atomic on the follow-up packet (`ApplyAround` / `RangeSkillDmg` / `SkillHit`). Server was sending both a `CastSkillPacket(1015)` and the damage packet, which on v487 surfaced as a soft assert spam plus a malformed second packet because of an underrun in `SkillHitPacket`.
+
+- **Removed all 8 `CastSkillPacket` broadcasts** in `PartnerSkillPacketProcessor.cs` (4 dungeon + 4 map server, two indent patterns each). Replaced with a comment explaining v487 RecvSkill is dead. Followed by `CastSkillPacket.cs` file deletion since it's now unreferenced.
+- **`SkillHitPacket` `nBattleOption`** — was `WriteByte(0)` (1B); v487 reads `WriteInt(0)` (4B). Underrun was being absorbed as part of the next field, breaking the entire follow-up packet for any skill that landed on multiple targets.
+- **`MonsterSkillDamagePacket.cs` deleted** — used dead packet ID `16011` (`Qinglongmon RaidChainSkill`) that no v487 client cares about. `GameMapMobBehavior.cs` switched the 2 broadcast sites to a per-target `SkillHitPacket` loop (renamed loop var to `hitTarget` to avoid shadowing the outer `target`).
+
+## DigimonEvo.bin: `SEvolutionInfo[9]` is the per-form outgoing-evolution table
+
+Re-audit of `DigimonEvo.bin`. The previous audit marked offset 8..80 (`SEvolutionInfo[9]`, 9 × 8 bytes) as "redundant — each branch target appears as its own evolveObj." That was wrong: it IS the table the client's QuickEvol UI iterates by position. The client populates each evolution icon from `m_nEvolutionList[i]`, and on click sends `SendEvolution(uid, i)` — the server's `evoStage` from that packet is the index into this same per-form list.
+
+Symptom: clicking any digivolve slot was a silent no-op. `PartnerEvolutionPacketProcessor`'s very first guard `if (evoLine == null || !evoLine.Any())` was firing on every request because the bin handler never populated `EvolutionLineAssetDTO.Stages`. Server sent `DigimonEvolutionFailPacket` and bailed without logging.
+
+- `DigimonEvoBinLoader.cs` now parses the 9 × 8-byte `SEvolutionInfo` array (each entry: `int nSlot`, `int dwDigimonID`) and exposes them as a `IReadOnlyList<DigimonEvoStage>` on `DigimonEvoLine`.
+- `DigimonEvolutionAssetsQueryHandler.cs` populates `EvolutionLineAssetDTO.Stages` from those per-form entries (`Type = TargetType`, `Value = Slot`). Empty slots (`INVAIDE` sentinel) are preserved so the index from the client lines up 1:1.
+- Scoped to `Application.GameAssets` only — the `Application.CharacterAssets` side is the character-creation path and doesn't need `Stages`.
+
+## Leveling: bin EXP is wire-format units (×100), server compares against real units
+
+Partner at 5xxx% should-have-leveled but didn't. The v487 client reads tamer/digimon EXP threshold via `s_dwExp * 0.01f` (`FmTamer.cpp:169`), so a bin row of `13500` displays as `135%` on screen. The server stores `tamer.CurrentExperience` in real units, and the OLD pre-bin path compared against `Asset_CharacterLevelStatus.ExpValue` which was already-divided. Without the same divide on the bin path, server compared e.g. `8010 < 13500` and never leveled up while the UI showed 5xxx%.
+
+- `TamerLevelingAssetsQueryHandler.cs` and `DigimonLevelingAssetsQueryHandler.cs` now divide bin `Exp` by 100 to match the real-units convention used by the level-up comparator.
+
+## Account legacy backfill at login
+
+Legacy accounts created before `AccountModel.Create` standardized the four account-level item lists (`AccountWarehouse`, `CashWarehouse`, `ShopWarehouse`, `BuyHistory`) had `null` rows for those slots. `ComplementarInformationPacketProcessor`'s `LoadInventoryPacket` call hit a null-deref and the handler crashed silently — no log, no client message — leaving the player stuck in `Connected` state at the post-character-select loading screen.
+
+- New `EnsureAccountItemListAsync(accountId, type)` on `IAccountCommandsRepository` + `AccountCommandsRepository`. Idempotent: no-op if a row of that type already exists. Sizes default to the bin-driven values (`ItemListModel.BinDrivenDefaults`) when present, falling back to the matching `GeneralSizeEnum` constant.
+- New `CreateAccountItemListCommand` + handler under `Application/Separar/Commands/Create/`. Sent during login to backfill any missing list before the in-memory `account.ItemList.ForEach(character.AddItemList)` runs.
+- `InitialInformationPacketProcessor.cs` now calls the command for each of the four list types before mapping into the character.
+
+## Game host: async exception observability
+
+`GamePacketProcessor.ProcessPacketAsync` is invoked fire-and-forget from `GameServer.OnDataReceivedEvent` (no `await`), so any async exception thrown inside a packet handler ended up on the unobserved-task scheduler and disappeared. This was masking real handler crashes (the EnsureList null-deref above was found only after adding the catch).
+
+- Added a try/catch around the `processor.Process(client, data)` call site logging `Handler ({Type}) threw for tamer {TamerId}: {Msg}`. Surface area only — no behavior change for the success path.
+
 ## Game.Host: DMBase.bin fully wired (all 11 sections)
 
 Phase-2 of the bin migration. `DMBase.bin` now backs every server feature it describes, with each unwired field documented as N/A only after the v487 client was grepped to verify no consumer exists. New `DMBaseBinLoader` parses all 11 sections at boot and replaces the matching DB-backed query handlers.
