@@ -91,12 +91,13 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Server
                 .FirstOrDefaultAsync(x => x.Type == type && x.Level == level);
         }
 
-        public async Task<CharacterBaseStatusAssetDTO?> GetTamerBaseStatusAsync(CharacterModelEnum type)
-        {
-            return await _context.TamerBaseStatusAsset
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Type == type);
-        }
+        // Retired — see IServerQueriesRepository.GetTamerBaseStatusAsync.
+        //public async Task<CharacterBaseStatusAssetDTO?> GetTamerBaseStatusAsync(CharacterModelEnum type)
+        //{
+        //    return await _context.TamerBaseStatusAsset
+        //        .AsNoTracking()
+        //        .FirstOrDefaultAsync(x => x.Type == type);
+        //}
 
         public async Task<ServerDTO?> GetServerByIdAsync(long id)
         {
@@ -435,12 +436,12 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Server
                 .ToListAsync();
         }
 
-        public async Task<List<CharacterBaseStatusAssetDTO>> GetAllTamerBaseStatusAsync()
-        {
-            return await _context.TamerBaseStatusAsset
-                .AsNoTracking()
-                .ToListAsync();
-        }
+        //public async Task<List<CharacterBaseStatusAssetDTO>> GetAllTamerBaseStatusAsync()
+        //{
+        //    return await _context.TamerBaseStatusAsset
+        //        .AsNoTracking()
+        //        .ToListAsync();
+        //}
 
         public async Task<List<AccessoryRollAssetDTO>> GetAccessoryRollInfoAsync()
         {

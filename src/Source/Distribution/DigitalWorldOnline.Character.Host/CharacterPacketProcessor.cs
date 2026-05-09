@@ -165,11 +165,14 @@ namespace DigitalWorldOnline.Character
 
                         //TODO: remover busca de status assets daqui
                         DebugLog("Getting tamer status information...");
-                        character.SetBaseStatus(
-                            _mapper.Map<CharacterBaseStatusAssetModel>(
-                                await _sender.Send(
-                                    new TamerBaseStatusQuery(character.Model)
-                                )));
+                        // Per-model tamer "base status" retired — see InitialInformationPacketProcessor.
+                        // The TamerLevelStatusQuery below (DMBase.bin §1) carries the full per-level
+                        // stat block; equipment/socket/buff add on top in CharacterModelBehavior.
+                        //character.SetBaseStatus(
+                        //    _mapper.Map<CharacterBaseStatusAssetModel>(
+                        //        await _sender.Send(
+                        //            new TamerBaseStatusQuery(character.Model)
+                        //        )));
 
                         character.SetLevelStatus(
                             _mapper.Map<CharacterLevelStatusAssetModel>(

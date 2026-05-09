@@ -17,8 +17,8 @@ namespace DigitalWorldOnline.Application.CharacterAssets.Mapping
             CreateMap<StatusAssetModel, StatusDTO>()
                 .ReverseMap();
 
-            CreateMap<CharacterBaseStatusAssetModel, CharacterBaseStatusAssetDTO>()
-                .ReverseMap();
+            //CreateMap<CharacterBaseStatusAssetModel, CharacterBaseStatusAssetDTO>()
+            //    .ReverseMap();
 
             CreateMap<CharacterLevelStatusAssetModel, CharacterLevelStatusAssetDTO>()
                 .ReverseMap();

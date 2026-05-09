@@ -149,10 +149,11 @@ namespace DigitalWorldOnline.Commons.Models.Character
         /// </summary>
         public List<CharacterMapRegionModel> MapRegions { get; private set; }
 
-        /// <summary>
-        /// Character base status details.
-        /// </summary>
-        public CharacterBaseStatusAssetModel BaseStatus { get; private set; }
+        // Retired — see CharacterModelBehavior.SetBaseStatus / GetTamerBaseStatus.
+        ///// <summary>
+        ///// Character base status details.
+        ///// </summary>
+        //public CharacterBaseStatusAssetModel BaseStatus { get; private set; }
 
         /// <summary>
         /// Character leveling status details.

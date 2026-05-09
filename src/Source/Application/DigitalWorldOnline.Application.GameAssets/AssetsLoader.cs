@@ -22,7 +22,9 @@ namespace DigitalWorldOnline.Application.GameAssets
         public List<ItemAssetModel> ItemInfo { get; private set; }
         public List<SummonModel> SummonInfo { get; private set; }
         public List<CharacterLevelStatusAssetModel> TamerLevelInfo { get; private set; }
-        public List<CharacterBaseStatusAssetModel> TamerBaseInfo { get; private set; }
+        // Retired: see InitialInformationPacketProcessor / StatusManager — per-model baseline
+        // is no longer needed; DMBase.bin §1 (TamerLevelInfo) carries the full per-level stats.
+        //public List<CharacterBaseStatusAssetModel> TamerBaseInfo { get; private set; }
         public List<DigimonLevelStatusAssetModel> DigimonLevelInfo { get; private set; }
         public List<DigimonBaseInfoAssetModel> DigimonBaseInfo { get; private set; }
         public List<DigimonSkillAssetModel> DigimonSkillInfo { get; private set; }
@@ -81,7 +83,7 @@ namespace DigitalWorldOnline.Application.GameAssets
             SummonInfo = _mapper.Map<List<SummonModel>>(await _sender.Send(new SummonAssetsQuery()));
             SkillCodeInfo = _mapper.Map<List<SkillCodeAssetModel>>(await _sender.Send(new SkillCodeAssetsQuery()));
             TamerLevelInfo = _mapper.Map<List<CharacterLevelStatusAssetModel>>(await _sender.Send(new TamerLevelingAssetsQuery()));
-            TamerBaseInfo = _mapper.Map<List<CharacterBaseStatusAssetModel>>(await _sender.Send(new TamerBaseStatusAssetsQuery()));
+            //TamerBaseInfo = _mapper.Map<List<CharacterBaseStatusAssetModel>>(await _sender.Send(new TamerBaseStatusAssetsQuery()));
             DigimonLevelInfo = _mapper.Map<List<DigimonLevelStatusAssetModel>>(await _sender.Send(new DigimonLevelingAssetsQuery()));
             DigimonBaseInfo = _mapper.Map<List<DigimonBaseInfoAssetModel>>(await _sender.Send(new AllDigimonBaseInfoQuery()));
             SkillInfo = _mapper.Map<List<SkillInfoAssetModel>>(await _sender.Send(new SkillInfoAssetsQuery()));

@@ -23,7 +23,10 @@ namespace DigitalWorldOnline.Commons.Models.Character
         public bool TempCalculating { get; set; } //TODO: Remover após abstração da movimentação
         public DateTime TempUpdating { get; set; } = DateTime.Now; //TODO: Remover após abstração da movimentação
 
-        private int _baseMs => BaseStatus.MSValue + LevelingStatus.MSValue;
+        // Was: BaseStatus.MSValue + LevelingStatus.MSValue. Per-model BaseStatus retired —
+        // DMBase.bin §1's MoveSpeed is now the authoritative naked-MS at each level.
+        // Equipment / Socket / Buff modifiers continue to add on top in the MS getter below.
+        private int _baseMs => /*BaseStatus.MSValue +*/ LevelingStatus.MSValue;
         private int _baseHp => LevelingStatus.HPValue;
         private int _baseDs => LevelingStatus.DSValue;
         private int _baseAt => LevelingStatus.ATValue;
@@ -1701,11 +1704,12 @@ namespace DigitalWorldOnline.Commons.Models.Character
         public void UpdateEventState(CharacterEventStateEnum state) => EventState = state;
 
         public void UpdateName(string name) => Name = name;
-        /// <summary>
-        /// Updates the tamer base status values.
-        /// </summary>
-        /// <param name="status">The status to be updated</param>
-        public void SetBaseStatus(CharacterBaseStatusAssetModel status) => BaseStatus = status;
+        // Retired — see GetTamerBaseStatus / TamerBaseInfo. Kept commented for revert ease.
+        ///// <summary>
+        ///// Updates the tamer base status values.
+        ///// </summary>
+        ///// <param name="status">The status to be updated</param>
+        //public void SetBaseStatus(CharacterBaseStatusAssetModel status) => BaseStatus = status;
 
         /// <summary>
         /// Updates the tamer level status values.

@@ -2,6 +2,42 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Tamer per-model "base status" baseline retired
+
+DSO emulator carried a per-tamer-model baseline (`Asset_TamerBaseStatusAsset`, 12 rows) that was added on top of the per-level stats. Audit of v487 client showed it has no equivalent — the client computes tamer stats purely from `BaseMng.GetTamerBase(level, tamerType)` (DMBase.bin §1 in our setup), with equipment/socket/buff modifiers added at runtime. The per-model baseline was emulator-only.
+
+Closer look at the consumer side made it clear the baseline barely did anything anyway: only `_baseMs` actually summed `BaseStatus.MSValue + LevelingStatus.MSValue`; HP/DS/AT/DE were all read from `LevelingStatus` exclusively. Retiring it brings the server in line with v487's stat math without losing any field that was meaningfully driving in-game numbers.
+
+**All retirement edits are commented out, not deleted** — easy revert if a future feature wants the per-model baseline back. Files left in place: `CharacterBaseStatusAssetDTO.cs`, `CharacterBaseStatusAssetModel.cs`, `CharacterBaseStatusAssetConfiguration.cs`, plus the `TamerBaseStatusAsset*Query*` files in both Application projects (orphaned but compilable). The MariaDB `Asset_TamerBaseStatusAsset` table is left in place too — not migrated away, just no longer queried.
+
+- `CharacterModelBehavior.cs:26` — `_baseMs` is now `LevelingStatus.MSValue` only. Net effect: naked-stats MS at level X is whatever DMBase.bin §1 ships for that tamerType+level. Equipment/Socket/Buff layers still accumulate via the `MS` getter as before.
+- `CharacterModel.cs:155` — `BaseStatus` property commented.
+- `CharacterModelBehavior.cs:1708` — `SetBaseStatus(...)` setter commented.
+- `Game.Host/Managers/StatusManager.cs:18-21` — `GetTamerBaseStatus(model)` commented.
+- `Game.Host/PacketProcessors/InitialInformationPacketProcessor.cs:146-150` — `character.SetBaseStatus(...)` call commented.
+- `Character.Host/CharacterPacketProcessor.cs:168-172` — `character.SetBaseStatus(...)` call (character-creation path) commented.
+- `Application.GameAssets/AssetsLoader.cs:25, 84` — `TamerBaseInfo` property + boot-time load commented.
+- `Application.GameAssets/Mapping/GameAssetsProfile.cs:20` and `Application.CharacterAssets/Mapping/CharacterAssetsProfile.cs:20` — `Model→DTO` AutoMapper profile lines commented.
+- `IServerQueriesRepository.cs:86, 114` — interface methods `GetTamerBaseStatusAsync` + `GetAllTamerBaseStatusAsync` commented.
+- `Infraestructure/Repositories/Server/ServerQueriesRepository.cs:94, 438` — implementations commented.
+- `Infraestructure/DatabaseContext/DatabaseContext.Asset.cs:19, 56` — `DbSet<CharacterBaseStatusAssetDTO>` and the `ApplyConfiguration(...)` call commented.
+- `Application.GameAssets/Queries/TamerBaseStatusAssetsQueryHandler.cs` — handler now returns an empty list instead of calling the deleted repo method (it was the only orphaned handler that broke compile after the interface removal).
+
+Game.Host, Character.Host, Account.Host all build clean (0 errors); 3-host smoke boot verified. No runtime errors observed during login/character-load on the test session — no `TamerBaseInfo` accesses, no null-derefs.
+
+## TamerList.bin not migrated this round
+
+Audit (see `Tamer.h` + `TamerMng.cpp::SaveBin`) found the bin holds 2 sections totaling 19844 B: 12 × 1500 B `CsTamer::sINFO` + 9 × 204 B `CsEmotion::sINFO`. After stripping strings (UI-only display fields: name, sound dir, comment, part name, gender path, emote command aliases), the only currently-server-relevant fields are `s_dwTamerID`, `s_nTamerType`, `s_Skill[5]` in §1 — and only `s_Skill[5]` actually drives a feature, which doesn't activate until Skill.bin lands (Phase 6).
+
+The two queries the bin map plan pointed at TamerList.bin (`TamerBaseStatusAssetsQuery` + `TamerSkillAssetsQuery`) don't fit:
+
+- `TamerBaseStatusAssetsQuery` returns per-model baseline stats not present anywhere in v487 bins. **Retired** — see section above.
+- `TamerSkillAssetsQuery` returns `(SkillId, SkillCode, Duration)` which lives in Skill.bin, not TamerList.bin. **Deferred to Phase 6.**
+
+`s_nTamerType` could be loaded as the authoritative key for `TamerLevelingAssetsQueryHandler` to drop the `tamerType == modelID − 80000` assumption, but that assumption is the conventional v487 convention (model 80001 = type 1, …, model 80012 = type 12) and worth verifying with a one-off bin probe before adding loader plumbing for one byte. Captured in memory plan; will revisit when Skill.bin lands and `s_Skill[5]` becomes actionable.
+
+Phase 2 in the bin migration plan effectively reduces to "retire the per-model baseline" alone. Phase 3 (Buff.bin + Achieve.bin + Event.bin) is the next real bin-loading work.
+
 ## Mob packets: v487 wire format alignment + per-tamer batching
 
 Mobs were not rendering in-game. Three layered bugs in the LoadMobsPacket / sync pipeline plus a client-side dispatch truncation. Net effect after the fixes: mobs spawn, walk, run, take damage, die, drop loot.

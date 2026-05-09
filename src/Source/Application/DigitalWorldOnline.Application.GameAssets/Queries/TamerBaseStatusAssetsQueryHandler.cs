@@ -15,7 +15,10 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
 
         public async Task<List<CharacterBaseStatusAssetDTO>> Handle(TamerBaseStatusAssetsQuery request, CancellationToken cancellationToken)
         {
-            return await _repository.GetAllTamerBaseStatusAsync();
+            // Retired — see GameAssets/AssetsLoader.cs (TamerBaseInfo). Returning empty list keeps
+            // any orphaned consumer well-formed; no caller is wired now.
+            return await Task.FromResult(new List<CharacterBaseStatusAssetDTO>());
+            //return await _repository.GetAllTamerBaseStatusAsync();
         }
     }
 }

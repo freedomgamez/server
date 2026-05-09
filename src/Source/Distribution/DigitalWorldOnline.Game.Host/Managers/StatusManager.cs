@@ -15,10 +15,14 @@ namespace DigitalWorldOnline.Game.Managers
             _assets = assets;
         }
 
-        public CharacterBaseStatusAssetModel GetTamerBaseStatus(CharacterModelEnum characterModel)
-        {
-            return _assets.TamerBaseInfo.Single(x => x.Type == characterModel);
-        }
+        // Retired: per-model tamer "base status" was an emulator-only baseline added on top of
+        // the per-level stats. v487 client computes purely from BaseMng->GetTamerBase(level,
+        // tamerType) (DMBase.bin §1). Use GetTamerLevelStatus(model, level) instead;
+        // equipment/socket/buff modifiers accumulate via CharacterModelBehavior.
+        //public CharacterBaseStatusAssetModel GetTamerBaseStatus(CharacterModelEnum characterModel)
+        //{
+        //    return _assets.TamerBaseInfo.Single(x => x.Type == characterModel);
+        //}
 
         public CharacterLevelStatusAssetModel GetTamerLevelStatus(CharacterModelEnum characterModel, byte level)
         {

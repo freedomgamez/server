@@ -143,11 +143,14 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
 
             _logger.Debug($"Getting character status information...");
-            character.SetBaseStatus(
-                _statusManager.GetTamerBaseStatus(
-                    character.Model
-                )
-            );
+            // Per-model tamer "base status" retired — DMBase.bin §1 carries the full per-level
+            // stat block, equipment/socket/buff add on top in CharacterModelBehavior. v487 client
+            // never had a separate per-model baseline. See LevelingStatus path below.
+            //character.SetBaseStatus(
+            //    _statusManager.GetTamerBaseStatus(
+            //        character.Model
+            //    )
+            //);
 
             character.SetLevelStatus(
                 _statusManager.GetTamerLevelStatus(

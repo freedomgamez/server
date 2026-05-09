@@ -16,7 +16,9 @@ namespace DigitalWorldOnline.Infraestructure
         public DbSet<DigimonBaseInfoAssetDTO> DigimonBaseInfoAsset { get; set; }
         public DbSet<MonsterBaseInfoAssetDTO> MonsterBaseInfoAsset { get; set; }
         public DbSet<DigimonLevelStatusAssetDTO> DigimonLevelStatusAsset { get; set; }
-        public DbSet<CharacterBaseStatusAssetDTO> TamerBaseStatusAsset { get; set; }
+        // Retired — see GameAssets/AssetsLoader.cs (TamerBaseInfo). Table left in place; not
+        // queried, not migrated away. Uncomment to revive if the per-model baseline is reinstated.
+        //public DbSet<CharacterBaseStatusAssetDTO> TamerBaseStatusAsset { get; set; }
         public DbSet<CharacterLevelStatusAssetDTO> TamerLevelStatusAsset { get; set; }
         public DbSet<DigimonSkillAssetDTO> DigimonSkillAsset { get; set; }
         public DbSet<MonsterSkillAssetDTO> MonsterSkillAsset { get; set; }
@@ -53,7 +55,7 @@ namespace DigitalWorldOnline.Infraestructure
             builder.ApplyConfiguration(new DigimonBaseInfoAssetConfiguration());
             builder.ApplyConfiguration(new MonsterBaseInfoAssetConfiguration());
             builder.ApplyConfiguration(new DigimonLevelStatusAssetConfiguration());
-            builder.ApplyConfiguration(new CharacterBaseStatusAssetConfiguration());
+            //builder.ApplyConfiguration(new CharacterBaseStatusAssetConfiguration());
             builder.ApplyConfiguration(new CharacterLevelStatusAssetConfiguration());
             builder.ApplyConfiguration(new MapRegionListAssetConfiguration());
             builder.ApplyConfiguration(new MapRegionAssetConfiguration());

@@ -83,7 +83,9 @@ namespace DigitalWorldOnline.Commons.Interfaces
 
         Task<AttendanceRewardDTO?> GetTamerAttendanceAsync(long characterId);
 
-        Task<CharacterBaseStatusAssetDTO?> GetTamerBaseStatusAsync(CharacterModelEnum type);
+        // Retired — see GameAssets/AssetsLoader.cs (TamerBaseInfo). Per-level row in DMBase.bin §1
+        // is now the single source of truth.
+        //Task<CharacterBaseStatusAssetDTO?> GetTamerBaseStatusAsync(CharacterModelEnum type);
 
         Task<CharacterLevelStatusAssetDTO?> GetTamerLevelingStatusAsync(CharacterModelEnum type, byte level);
         
@@ -111,7 +113,7 @@ namespace DigitalWorldOnline.Commons.Interfaces
 
         Task<List<TitleStatusAssetDTO>> GetAllTitleStatusInfoAsync();
 
-        Task<List<CharacterBaseStatusAssetDTO>> GetAllTamerBaseStatusAsync();
+        //Task<List<CharacterBaseStatusAssetDTO>> GetAllTamerBaseStatusAsync();
 
         Task<List<AccessoryRollAssetDTO>> GetAccessoryRollInfoAsync();
 
