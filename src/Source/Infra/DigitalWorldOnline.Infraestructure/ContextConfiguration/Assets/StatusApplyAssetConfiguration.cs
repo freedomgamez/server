@@ -1,0 +1,26 @@
+﻿using DigitalWorldOnline.Commons.DTOs.Assets;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Assets
+{
+    public class StatusApplyAssetConfiguration : IEntityTypeConfiguration<StatusApplyAssetDTO>
+    {
+        public void Configure(EntityTypeBuilder<StatusApplyAssetDTO> builder)
+        {
+            builder
+                .ToTable("Asset_StatusApply")
+                .HasKey(x => x.Id);
+
+            builder
+                .Property(e => e.StageValue)
+                .HasColumnType("int")
+                .IsRequired();
+            
+            builder
+                .Property(e => e.ApplyValue)
+                .HasColumnType("int")
+                .IsRequired();
+        }
+    }
+}

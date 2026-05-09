@@ -1,0 +1,21 @@
+﻿using DigitalWorldOnline.Commons.DTOs.Character;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Character
+{
+    public class CharacterBuffListConfiguration : IEntityTypeConfiguration<CharacterBuffListDTO>
+    {
+        public void Configure(EntityTypeBuilder<CharacterBuffListDTO> builder)
+        {
+            builder
+                .ToTable("Character_BuffList")
+                .HasKey(x => x.Id);
+
+            builder
+                .HasMany(x => x.Buffs)
+                .WithOne(x => x.BuffList)
+                .HasForeignKey(x => x.BuffListId);
+        }
+    }
+}

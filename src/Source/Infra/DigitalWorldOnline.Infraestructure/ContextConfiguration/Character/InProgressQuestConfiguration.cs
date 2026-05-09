@@ -1,0 +1,46 @@
+﻿using DigitalWorldOnline.Commons.DTOs.Character;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Character
+{
+    public class InProgressQuestConfiguration : IEntityTypeConfiguration<InProgressQuestDTO>
+    {
+        public void Configure(EntityTypeBuilder<InProgressQuestDTO> builder)
+        {
+            builder
+                .ToTable("Character_InProgressQuest")
+                .HasKey(x => x.Id);
+
+            builder
+                .Property(e => e.QuestId)
+                .HasColumnType("smallint")
+                .IsRequired();
+
+            builder
+                .Property(e => e.FirstCondition)
+                .HasColumnType("tinyint unsigned")
+                .IsRequired();
+
+            builder
+                .Property(e => e.SecondCondition)
+                .HasColumnType("tinyint unsigned")
+                .IsRequired();
+
+            builder
+                .Property(e => e.ThirdCondition)
+                .HasColumnType("tinyint unsigned")
+                .IsRequired();
+
+            builder
+                .Property(e => e.FourthCondition)
+                .HasColumnType("tinyint unsigned")
+                .IsRequired();
+
+            builder
+                .Property(e => e.FifthCondition)
+                .HasColumnType("tinyint unsigned")
+                .IsRequired();
+        }
+    }
+}

@@ -1,0 +1,35 @@
+﻿using DigitalWorldOnline.Commons.DTOs.Config;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Config
+{
+    public class BitsDropRewardConfigConfiguration : IEntityTypeConfiguration<BitsDropConfigDTO>
+    {
+        public void Configure(EntityTypeBuilder<BitsDropConfigDTO> builder)
+        {
+            builder
+                .ToTable("Config_BitsDropReward")
+                .HasKey(x => x.Id);
+            
+            builder
+                .Property(e => e.MinAmount)
+                .HasColumnType("int")
+                .HasDefaultValue(0)
+                .IsRequired();
+
+            builder
+                .Property(e => e.MaxAmount)
+                .HasColumnType("int")
+                .HasDefaultValue(0)
+                .IsRequired();
+            
+            builder
+                .Property(e => e.Chance)
+                .HasColumnType("decimal(9,2)")
+                .HasDefaultValue(0)
+                .IsRequired();
+
+        }
+    }
+}

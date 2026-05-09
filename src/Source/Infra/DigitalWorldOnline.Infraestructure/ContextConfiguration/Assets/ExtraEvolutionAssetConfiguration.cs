@@ -1,0 +1,42 @@
+﻿using DigitalWorldOnline.Commons.DTOs.Assets;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Assets
+{
+    public class ExtraEvolutionAssetConfiguration : IEntityTypeConfiguration<ExtraEvolutionAssetDTO>
+    {
+        public void Configure(EntityTypeBuilder<ExtraEvolutionAssetDTO> builder)
+        {
+            builder
+           .ToTable("Asset_ExtraEvolution")
+           .HasKey(x => x.Id);
+
+            builder
+               .Property(e => e.DigimonId)
+               .HasColumnType("int")
+               .IsRequired();
+
+            builder
+              .Property(e => e.Price)
+              .HasColumnType("bigint")
+              .IsRequired();
+
+
+            builder
+              .Property(e => e.RequiredLevel)
+              .HasColumnType("tinyint unsigned")
+              .IsRequired();
+
+            builder
+               .HasMany(x => x.Materials)
+               .WithOne(x => x.ExtraEvolution)
+               .HasForeignKey(x => x.ExtraEvolutionId);
+
+            builder
+             .HasMany(x => x.Requireds)
+             .WithOne(x => x.ExtraEvolution)
+             .HasForeignKey(x => x.ExtraEvolutionId);
+        }
+    }
+}
