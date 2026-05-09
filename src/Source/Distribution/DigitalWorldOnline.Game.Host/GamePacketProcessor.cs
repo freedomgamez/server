@@ -1,4 +1,5 @@
 ﻿using DigitalWorldOnline.Application;
+using DigitalWorldOnline.Application.GameAssets;
 using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Interfaces;

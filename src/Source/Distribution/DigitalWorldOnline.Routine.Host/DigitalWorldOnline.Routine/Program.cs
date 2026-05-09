@@ -1,4 +1,6 @@
 ﻿using DigitalWorldOnline.Application;
+using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Mapping;
 using DigitalWorldOnline.Application.Admin.Repositories;
 using DigitalWorldOnline.Application.Extensions;
 using DigitalWorldOnline.Commons.Interfaces;
@@ -63,7 +65,7 @@ namespace DigitalWorldOnline.Routine
                     services.AddScoped<IConfigQueriesRepository, ConfigQueriesRepository>();
                     services.AddScoped<IConfigCommandsRepository, ConfigCommandsRepository>();
                     services.AddAutoMapper(typeof(AccountProfile));
-                    services.AddAutoMapper(typeof(AssetsProfile));
+                    services.AddAutoMapper(typeof(GameAssetsProfile));
                     services.AddAutoMapper(typeof(CharacterProfile));
                     services.AddAutoMapper(typeof(ConfigProfile));
                     services.AddAutoMapper(typeof(DigimonProfile));
@@ -77,7 +79,9 @@ namespace DigitalWorldOnline.Routine
                     services.AddHostedService<RoutineServer>();
                     services.AddTransient<Mediator>();
                     services.AddSingleton<AssetsLoader>();
-                    services.AddMediatR(typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly);
+                    services.AddMediatR(
+                        typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly,
+                        typeof(GameAssetsMarker).GetTypeInfo().Assembly);
                 })
                 .ConfigureHostConfiguration(hostConfig =>
                 {

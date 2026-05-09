@@ -1,7 +1,9 @@
 ﻿using AutoMapper;
 using DigitalWorldOnline.Application;
+using DigitalWorldOnline.Application.GameAssets;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
+using DigitalWorldOnline.Application.GameAssets.Queries;
 using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums.Character;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
@@ -223,7 +225,16 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             await ReceiveArenaPoints(client);
 
-            client.Send(new InitialInfoPacket(character, party));
+            // Diagnostic: dump InitialInfoPacket bytes to file for offset analysis.
+            {
+                var __pkt = new InitialInfoPacket(character, party);
+                var __bytes = __pkt.Serialize();
+                System.IO.File.WriteAllBytes("/tmp/initgamedata_dump.bin", __bytes);
+                _logger.Information($"Dumped InitialInfoPacket: {__bytes.Length} bytes -> /tmp/initgamedata_dump.bin");
+                client.Send(__bytes);
+            }
+
+
 
             _logger.Debug($"Updating character channel...");
             await _sender.Send(new UpdateCharacterChannelCommand(character.Id, character.Channel));

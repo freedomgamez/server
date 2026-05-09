@@ -2,6 +2,8 @@ using AspNetCoreRateLimit;
 using DigitalWorldOnline.Api.Dtos.Errors;
 using DigitalWorldOnline.Application.Admin.Commands;
 using DigitalWorldOnline.Application.Admin.Repositories;
+using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Mapping;
 using DigitalWorldOnline.Application.Extensions;
 using DigitalWorldOnline.Application.Services;
 using DigitalWorldOnline.Commons.Interfaces;
@@ -59,7 +61,9 @@ namespace DigitalWorldOnline.Api
 
             services.AddTransient<Mediator>();
             services.AddSingleton<ISender, ScopedSender<Mediator>>();
-            services.AddMediatR(typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly);
+            services.AddMediatR(
+                typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly,
+                typeof(GameAssetsMarker).GetTypeInfo().Assembly);
             services.AddSingleton(ConfigureLogger(Configuration));
             services.AddMemoryCache();
             services.AddControllers();
@@ -85,7 +89,7 @@ namespace DigitalWorldOnline.Api
         private static void AddAutoMapper(IServiceCollection services)
         {
             services.AddAutoMapper(typeof(AccountProfile));
-            services.AddAutoMapper(typeof(AssetsProfile));
+            services.AddAutoMapper(typeof(GameAssetsProfile));
             services.AddAutoMapper(typeof(CharacterProfile));
             services.AddAutoMapper(typeof(ConfigProfile));
             services.AddAutoMapper(typeof(DigimonProfile));

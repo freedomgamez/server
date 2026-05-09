@@ -80,7 +80,6 @@ namespace DigitalWorldOnline.Account
                     services.AddTransient<Mediator>();
 
                     services.AddAutoMapper(typeof(AccountProfile));
-                    services.AddAutoMapper(typeof(AssetsProfile));
                     services.AddAutoMapper(typeof(CharacterProfile));
                     services.AddAutoMapper(typeof(ConfigProfile));
                     services.AddAutoMapper(typeof(DigimonProfile));

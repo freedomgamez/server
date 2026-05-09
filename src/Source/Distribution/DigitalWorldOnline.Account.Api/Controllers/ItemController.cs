@@ -2,9 +2,11 @@
 using DigitalWorldOnline.Api.Dtos.Converters;
 using DigitalWorldOnline.Api.Dtos.In;
 using DigitalWorldOnline.Application;
+using DigitalWorldOnline.Application.GameAssets;
 using DigitalWorldOnline.Application.Admin.Commands;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
+using DigitalWorldOnline.Application.GameAssets.Queries;
 using DigitalWorldOnline.Commons.DTOs.Character;
 using DigitalWorldOnline.Commons.Enums.Account;
 using DigitalWorldOnline.Commons.Extensions;

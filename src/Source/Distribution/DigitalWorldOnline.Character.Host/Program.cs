@@ -1,4 +1,6 @@
 ﻿using DigitalWorldOnline.Application.Admin.Repositories;
+using DigitalWorldOnline.Application.CharacterAssets;
+using DigitalWorldOnline.Application.CharacterAssets.Mapping;
 using DigitalWorldOnline.Application.Extensions;
 using DigitalWorldOnline.Application.Services;
 using DigitalWorldOnline.Commons.Interfaces;
@@ -76,11 +78,13 @@ namespace DigitalWorldOnline.Character
                     services.AddSingleton(ConfigureLogger(context.Configuration));
 
                     services.AddHostedService<CharacterServer>();
-                    services.AddMediatR(typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly);
+                    services.AddMediatR(
+                        typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly,
+                        typeof(CharacterAssetsMarker).GetTypeInfo().Assembly);
                     services.AddTransient<Mediator>();
 
                     services.AddAutoMapper(typeof(AccountProfile));
-                    services.AddAutoMapper(typeof(AssetsProfile));
+                    services.AddAutoMapper(typeof(CharacterAssetsProfile));
                     services.AddAutoMapper(typeof(CharacterProfile));
                     services.AddAutoMapper(typeof(ConfigProfile));
                     services.AddAutoMapper(typeof(DigimonProfile));

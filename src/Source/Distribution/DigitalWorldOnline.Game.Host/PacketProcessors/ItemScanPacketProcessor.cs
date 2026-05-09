@@ -1,4 +1,5 @@
 ﻿using DigitalWorldOnline.Application;
+using DigitalWorldOnline.Application.GameAssets;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Commons.DTOs.Base;
 using DigitalWorldOnline.Commons.Entities;

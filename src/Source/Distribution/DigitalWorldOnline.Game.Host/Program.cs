@@ -1,4 +1,6 @@
 ﻿using DigitalWorldOnline.Application;
+using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Mapping;
 using DigitalWorldOnline.Application.Admin.Repositories;
 using DigitalWorldOnline.Application.Extensions;
 using DigitalWorldOnline.Application.Services;
@@ -96,7 +98,9 @@ namespace DigitalWorldOnline.Game
 
                     services.AddHostedService<GameServer>();
 
-                    services.AddMediatR(typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly);
+                    services.AddMediatR(
+                        typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly,
+                        typeof(GameAssetsMarker).GetTypeInfo().Assembly);
                     services.AddTransient<Mediator>();
 
                     AddAutoMapper(services);
@@ -113,7 +117,7 @@ namespace DigitalWorldOnline.Game
         private static void AddAutoMapper(IServiceCollection services)
         {
             services.AddAutoMapper(typeof(AccountProfile));
-            services.AddAutoMapper(typeof(AssetsProfile));
+            services.AddAutoMapper(typeof(GameAssetsProfile));
             services.AddAutoMapper(typeof(CharacterProfile));
             services.AddAutoMapper(typeof(ConfigProfile));
             services.AddAutoMapper(typeof(DigimonProfile));

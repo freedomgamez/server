@@ -1,4 +1,5 @@
 ﻿using DigitalWorldOnline.Application;
+using DigitalWorldOnline.Application.GameAssets;
 using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Models;
 using DigitalWorldOnline.Commons.Models.Asset;

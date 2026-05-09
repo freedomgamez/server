@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using DigitalWorldOnline.Application;
+using DigitalWorldOnline.Application.GameAssets;
 using DigitalWorldOnline.Application.Routines.Commands;
 using DigitalWorldOnline.Application.Routines.Queries;
 using DigitalWorldOnline.Commons.Enums;
