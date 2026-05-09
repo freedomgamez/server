@@ -21,6 +21,8 @@ namespace DigitalWorldOnline.Commons.Models.Character
         public void Add(CharacterBuffModel buff)
         {
             if (Buffs.Any(x => x.BuffId == buff.BuffId)) return;
+            // See Digimon side for the v487 overlap-rule scope note —
+            // server-side enforcement belongs in ItemConsumePacketProcessor, not here.
             Buffs.Add(buff);
         }
 

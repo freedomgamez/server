@@ -413,6 +413,15 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
 
         /// <summary>
         /// Returns title status value from the target attribute.
+        /// <para>
+        /// **RETIRED in Phase 3** — v487 client has no per-title flat-stat block. Title
+        /// effects come through the achievement's <c>BuffCode</c> (see
+        /// <c>SetTitlePacketProcessor</c> + <c>Buff.bin</c>), not through this stat-bonus
+        /// path. The bin-backed <c>AllTitleStatusAssetsQueryHandler</c> populates rows with
+        /// default-zero stat fields, so the switch below always returns 0 in practice.
+        /// Method kept (rather than commented) so the 8 caller sites in stat getters keep
+        /// compiling without per-site comment noise. Behaviour change: identical (sum of 0s).
+        /// </para>
         /// </summary>
         /// <param name="status">Target attribute.</param>
         private int GetTitleStatus(StatusTypeEnum status)

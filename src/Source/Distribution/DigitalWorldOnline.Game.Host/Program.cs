@@ -100,6 +100,9 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<DMBaseBinLoader>();
                     services.AddSingleton<DigimonListBinLoader>();
                     services.AddSingleton<DigimonEvoBinLoader>();
+                    services.AddSingleton<BuffBinLoader>();
+                    services.AddSingleton<AchieveBinLoader>();
+                    services.AddSingleton<EventTableBinLoader>();
 
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
                     services.AddSingleton<IProcessor, GamePacketProcessor>();
@@ -128,6 +131,9 @@ namespace DigitalWorldOnline.Game
             var dmBase = host.Services.GetRequiredService<DMBaseBinLoader>().Load();
             var digimonList = host.Services.GetRequiredService<DigimonListBinLoader>().Load();
             var digimonEvo = host.Services.GetRequiredService<DigimonEvoBinLoader>().Load();
+            var buff = host.Services.GetRequiredService<BuffBinLoader>().Load();
+            var achieve = host.Services.GetRequiredService<AchieveBinLoader>().Load();
+            var eventTable = host.Services.GetRequiredService<EventTableBinLoader>().Load();
 
             // DMBase.bin section 7 MaxShareStash drives the AccountWarehouse default size
             // so the server matches what v487 client expects (Warehouse.cpp:81 reads s_nMaxShareStash).
@@ -148,6 +154,17 @@ namespace DigitalWorldOnline.Game
             serilog.Information(
                 "Loaded DigimonEvo.bin: {Count} evolution trees, {Lines} total evolution lines",
                 digimonEvo.ByType.Count, digimonEvo.ByType.Values.Sum(e => e.Lines.Count));
+            serilog.Information(
+                "Loaded Buff.bin: {Count} buffs", buff.ById.Count);
+            serilog.Information(
+                "Loaded Achieve.bin: {Total} achievements ({Titles} grant titles)",
+                achieve.All.Count, achieve.All.Count(a => a.BuffCode > 0));
+            serilog.Information(
+                "Loaded Event.bin: {Daily} daily-play + {Recommend} recommend + {Monthly} monthly + " +
+                "{HotTime} hot-time + {DailyCheck} daily-check (attendance window {AttStart:yyyy-MM-dd}..{AttEnd:yyyy-MM-dd})",
+                eventTable.Daily.Count, eventTable.Recommend.Count, eventTable.Monthly.Count,
+                eventTable.HotTime.Count, eventTable.DailyCheck.Sum(g => g.Rewards.Count),
+                eventTable.Attendance.Start, eventTable.Attendance.End);
 
             return host;
         }

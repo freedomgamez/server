@@ -21,6 +21,17 @@
             if (Buffs.Any(x => x.BuffId == buff.BuffId))
                 return;
 
+            // NOTE: v487 client has a same-class overlap rule (`DataMng.cpp:3895-3897`)
+            // but it's narrowly scoped: only fires when a player TRIES TO USE a consumable
+            // that would grant a system buff (`s_nBuffType == 3`), as a UI pre-check
+            // before opening the apply-confirm dialog. Comparison is
+            // `existing.MinLv <= incoming.MinLv → reject incoming` (lower-MinLv same-class
+            // buff blocks the upgrade). Server-side anti-cheat for this belongs in
+            // `ItemConsumePacketProcessor` (the only packet path that matches the client
+            // gate), not here — applying it to every buff Add would reject legitimate
+            // skill-cast / title-equip / evolution buff flows that the client never
+            // overlap-checks. Deferred: enforce in item consume when system buffs come
+            // through that path.
             Buffs.Add(buff);
         }
 

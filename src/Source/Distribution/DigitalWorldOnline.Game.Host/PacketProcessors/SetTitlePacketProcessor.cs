@@ -44,11 +44,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             if (OldTitleBuff != null)
             {
-                foreach (var partner in client.Tamer.Digimons.Where( x=> x.Id != client.Tamer.Partner.Id))
+                // Stash digimons (non-active partner) — used to drop the buff but never sent
+                // a RemoveBuffPacket. The packet is self-only (the tamer is the only viewer
+                // for stash digimons), but it still needs to fire so the client UI clears.
+                foreach (var partner in client.Tamer.Digimons.Where(x => x.Id != client.Tamer.Partner.Id))
                 {
-                    if(partner.BuffList.ForceExpired(OldTitleBuff.BuffId))
+                    if (partner.BuffList.ForceExpired(OldTitleBuff.BuffId))
                     {
                         partner.BuffList.Remove(OldTitleBuff.BuffId);
+                        client?.Send(new RemoveBuffPacket(partner.GeneralHandler, OldTitleBuff.BuffId));
 
                         await _sender.Send(new UpdateDigimonBuffListCommand(partner.BuffList));
                     }
@@ -58,6 +62,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 {
                     client.Partner.BuffList.Remove(OldTitleBuff.BuffId);
                     client?.Send(new RemoveBuffPacket(client.Partner.GeneralHandler, OldTitleBuff.BuffId));
+                }
+
+                // Tamer-side: title buffs whose SkillCode targets the tamer (e.g. cast-speed
+                // bonuses) get applied to client.Tamer.BuffList below; they were never being
+                // removed when the title changed, so the bonus persisted across title swaps.
+                if (client.Tamer.BuffList.ForceExpired(OldTitleBuff.BuffId))
+                {
+                    client.Tamer.BuffList.Remove(OldTitleBuff.BuffId);
+                    client?.Send(new RemoveBuffPacket(client.Tamer.GeneralHandler, OldTitleBuff.BuffId));
                 }
             }
 
@@ -89,6 +102,19 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 client.Partner.BuffList.Add(newDigimonBuff);
                 _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
                     new AddBuffPacket(client.Partner.GeneralHandler, buff, (short)0, 0).Serialize());
+
+                // Tamer-side apply: mirrors the partner branch. Title buffs whose SkillCode
+                // targets the tamer (DigimonSkillCode == 0 && SkillCode > 0) need to land on
+                // the tamer's own buff list to actually take effect. The C2 overlap-reject
+                // rule + BuffId dup-check prevents double-stacking if the buff isn't tamer-side.
+                if (buff.DigimonSkillCode == 0 && buff.SkillCode > 0)
+                {
+                    var newCharacterBuff = CharacterBuffModel.Create(buff.BuffId, buff.SkillId);
+                    newCharacterBuff.SetBuffInfo(buff);
+                    client.Tamer.BuffList.Add(newCharacterBuff);
+                    _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
+                        new AddBuffPacket(client.Tamer.GeneralHandler, buff, (short)0, 0).Serialize());
+                }
             }
 
             client.Tamer.UpdateCurrentTitle(titleId);        
