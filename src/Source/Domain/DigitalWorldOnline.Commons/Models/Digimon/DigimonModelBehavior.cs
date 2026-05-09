@@ -382,7 +382,10 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
             var i = 2;
             foreach (var evolutionLine in evolution.Lines)
             {
-                Evolutions.Add(new DigimonEvolutionModel(evolutionLine.Type));
+                var evo = new DigimonEvolutionModel(evolutionLine.Type);
+                if (evolutionLine.SkillMaxLevels != null)
+                    evo.SetSkillMaxLevels(evolutionLine.SkillMaxLevels);
+                Evolutions.Add(evo);
 
                 if (i > 0) Evolutions.Last().Unlock();
                 i--;
@@ -398,7 +401,10 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
             var i = 2;
             foreach (var evolutionLine in evolution.Lines)
             {
-                Evolutions.Add(new DigimonEvolutionModel(evolutionLine.Type));
+                var evo = new DigimonEvolutionModel(evolutionLine.Type);
+                if (evolutionLine.SkillMaxLevels != null)
+                    evo.SetSkillMaxLevels(evolutionLine.SkillMaxLevels);
+                Evolutions.Add(evo);
 
                 if (i > 0) Evolutions.Last().Unlock();
                 i--;

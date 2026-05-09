@@ -276,6 +276,22 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Server
             }
         }
 
+        public async Task UpdateGuildLevelAsync(long guildId, byte level, int currentExperience)
+        {
+            var dto = await _context.Guild
+                .AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == guildId);
+
+            if (dto != null)
+            {
+                dto.Level = level;
+                dto.CurrentExperience = currentExperience;
+
+                _context.Update(dto);
+                _context.SaveChanges();
+            }
+        }
+
         public async Task UpdateServerAsync(long serverId, string serverName, int experience, bool maintenance)
         {
             var dto = await _context.ServerConfig

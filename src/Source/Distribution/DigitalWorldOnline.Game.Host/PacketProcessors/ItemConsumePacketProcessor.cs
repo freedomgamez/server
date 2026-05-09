@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.Separar.Commands.Create;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
@@ -44,6 +45,9 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly AssetsLoader _assets;
         private readonly ConfigsLoader _configs;
         private readonly ExpManager _expManager;
+        private readonly FatigueService _fatigueService;   // FATIGUE_HOOK
+        private readonly DMBaseBinLoader _dmBase;
+        private readonly DigimonListBinLoader _digimonList;
         private readonly ISender _sender;
         private readonly ILogger _logger;
         private readonly IConfiguration _configuration;
@@ -54,7 +58,10 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             DungeonsServer dungeonsServer,
             AssetsLoader assets,
             ExpManager expManager,
+            FatigueService fatigueService,   // FATIGUE_HOOK
             ConfigsLoader configs,
+            DMBaseBinLoader dmBase,
+            DigimonListBinLoader digimonList,
             ISender sender,
             ILogger logger,
             IConfiguration configuration)
@@ -63,8 +70,11 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _mapServer = mapServer;
             _dungeonServer = dungeonsServer;
             _expManager = expManager;
+            _fatigueService = fatigueService;   // FATIGUE_HOOK
             _assets = assets;
             _configs = configs;
+            _dmBase = dmBase;
+            _digimonList = digimonList;
             _sender = sender;
             _logger = logger;
             _configuration = configuration;
@@ -127,8 +137,9 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                                                     {
                                                         var value = Convert.ToInt64(apply.Value);
 
-                                                        var result = _expManager.ReceiveTamerExperience(value, client.Tamer);
-                                                        var result2 = _expManager.ReceiveDigimonExperience(value, client.Tamer.Partner);
+                                                        var fatigueExp = _fatigueService.GetMultipliers(client).exp;   // FATIGUE_HOOK
+                                                        var result = _expManager.ReceiveTamerExperience(value, client.Tamer, fatigueExp);
+                                                        var result2 = _expManager.ReceiveDigimonExperience(value, client.Tamer.Partner, fatigueExp);
 
                                                         if (result.Success)
                                                         {
@@ -248,7 +259,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                                                 case ItemConsumeTargetEnum.Digimon:
                                                     {
-                                                        var digimonResult = _expManager.ReceiveDigimonExperience(apply.Value, client.Tamer.Partner);
+                                                        var digimonResult = _expManager.ReceiveDigimonExperience(apply.Value, client.Tamer.Partner, _fatigueService.GetMultipliers(client).exp);   // FATIGUE_HOOK
                                                         var value = Convert.ToInt64(apply.Value);
 
                                                         if (digimonResult.Success)
@@ -312,7 +323,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                                                     {
                                                         var value = Convert.ToInt64(apply.Value);
 
-                                                        var result = _expManager.ReceiveTamerExperience(value, client.Tamer);
+                                                        var result = _expManager.ReceiveTamerExperience(value, client.Tamer, _fatigueService.GetMultipliers(client).exp);   // FATIGUE_HOOK
                                                         if (result.Success)
                                                         {
                                                             client.Send(
@@ -470,6 +481,10 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             else if (targetItem.ItemInfo.Type == 72)
             {
                 await BombTeleport(client, itemSlot, targetItem);
+            }
+            else if (targetItem.ItemInfo.Type == 202)
+            {
+                await DskillExpansion(client, itemSlot, targetItem);
             }
             else
                 client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type));
@@ -1073,6 +1088,20 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         private async Task IncreaseArchiveSlots(GameClient client, short itemSlot, ItemModel targetItem)
         {
+            // Cap from DMBase.bin section 7 (sLIMIT.MaxTacticsHouse, 200 in v487).
+            // Client calls the digimon-archive table "TacticsHouse"; the bin's MaxTacticsHouse
+            // is the slot ceiling. Refuse the consume packet if already at or above the cap
+            // so the player doesn't lose the expansion item without effect.
+            int maxArchiveSlots = _dmBase.Data.Limit.MaxTacticsHouse;
+            if (client.Tamer.DigimonArchive.Slots >= maxArchiveSlots)
+            {
+                _logger.Warning(
+                    "Tamer {TamerId} tried to expand digimon archive past MaxTacticsHouse={Cap} (current={Current}); refusing consume of item {ItemId}.",
+                    client.TamerId, maxArchiveSlots, client.Tamer.DigimonArchive.Slots, targetItem.ItemId);
+                client.Send(new SystemMessagePacket($"Digimon archive is already at the maximum {maxArchiveSlots} slots."));
+                return;
+            }
+
             client.Tamer.DigimonArchive.AddSlot();
 
             _logger.Verbose($"Character {client.TamerId} used {targetItem.ItemId} to expand digimon archive slots to {client.Tamer.DigimonArchive.Slots}.");
@@ -1117,6 +1146,17 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         private async Task IncreaseWarehouseSlots(GameClient client, short itemSlot, ItemModel targetItem)
         {
+            // Cap from DMBase.bin section 7 (sLIMIT.MaxWareHouse, 245 in v487).
+            int maxWarehouseSlots = _dmBase.Data.Limit.MaxWareHouse;
+            if (client.Tamer.Warehouse.Size >= maxWarehouseSlots)
+            {
+                _logger.Warning(
+                    "Tamer {TamerId} tried to expand warehouse past MaxWareHouse={Cap} (current={Current}); refusing consume of item {ItemId}.",
+                    client.TamerId, maxWarehouseSlots, client.Tamer.Warehouse.Size, targetItem.ItemId);
+                client.Send(new SystemMessagePacket($"Warehouse is already at the maximum {maxWarehouseSlots} slots."));
+                return;
+            }
+
             var newSlot = client.Tamer.Warehouse.AddSlot();
 
             _logger.Verbose($"Character {client.TamerId} used {targetItem.ItemId} to expand warehouse slots to {client.Tamer.Warehouse.Size}.");
@@ -1132,6 +1172,63 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     new LoadInventoryPacket(client.Tamer.Warehouse, InventoryTypeEnum.Warehouse).Serialize()
                 )
             );
+        }
+
+        /// <summary>
+        /// Type-202 ("Skill DigiCode" / D-skill expansion) ItemConsume branch.
+        ///
+        /// IMPORTANT: the legitimate v487 client flow for these items is NOT ItemConsume.
+        /// It's a dedicated packet — `pDigimon::DigimonSkillLimitOpen` (see
+        /// <c>cCliGame::SendSkillMaxLvUp</c> in <c>DProject/network/cCliGameSkill.cpp:3038</c>) —
+        /// gated client-side by <c>#ifdef SDM_DIGIMONSKILL_LV_EXPEND_20181206</c>, which
+        /// IS defined in v487. The client opens a skill-slot picker UI, then sends
+        /// (item-pos, item-type, evolution-slot-array-index). The server replies with an
+        /// updated <c>cEvoUnit</c> whose <c>m_nSkillMaxLevel[nLimit::Skill]</c> array reflects
+        /// the new cap. The bin's <c>DskillOpenExpansion</c> entries provide the allowlist of
+        /// evolution stages each item rank may target; the actual rank → cap-delta mapping is
+        /// not in the bin (server-side decision).
+        ///
+        /// This server doesn't yet implement <c>DigimonSkillLimitOpen</c> — that's a future
+        /// packet handler, not bin work. Until then, the legitimate path is unreachable, so
+        /// any Type==202 item arriving here came via the generic ItemConsume packet, which
+        /// means a manipulated client. We log it and refuse to consume so a player can't
+        /// exploit the wrong codepath to burn the item or trip half-implemented logic.
+        /// </summary>
+        private Task DskillExpansion(GameClient client, short itemSlot, ItemModel targetItem)
+        {
+            var section = targetItem.ItemInfo.Section;
+            if (!_dmBase.Data.DskillOpenExpansion.TryGetValue(section, out var cfg))
+            {
+                _logger.Warning(
+                    "D-skill expansion item {ItemId} has Section={Section} not in DMBase.bin section 13.",
+                    targetItem.ItemId, section);
+                client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type));
+                return Task.CompletedTask;
+            }
+
+            var partnerListEntry = _digimonList.Data.FindByType(client.Partner.CurrentType);
+            int partnerEvoStage = partnerListEntry?.EvolutionType ?? 0;
+            if (!cfg.AllowedEvoTypes.Contains(partnerEvoStage))
+            {
+                _logger.Warning(
+                    "Tamer {TamerId}: D-skill item {ItemId} (rank {Rank}, allowed evo stages [{Allowed}]) rejected — partner is type {PartnerType} (stage {Stage}).",
+                    client.TamerId, targetItem.ItemId, cfg.ExpansionRank,
+                    string.Join(",", cfg.AllowedEvoTypes), client.Partner.CurrentType, partnerEvoStage);
+                client.Send(new SystemMessagePacket($"This skill expansion item can't be used on your current partner."));
+                client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type));
+                return Task.CompletedTask;
+            }
+
+            // TODO: actual skill-cap-raise effect not implemented yet. To preserve player items,
+            // refuse the consume here so the user keeps the item until the effect is implemented.
+            // When implemented: raise the partner's per-skill-slot MaxLevel by an amount derived
+            // from cfg.ExpansionRank; persist via UpdateEvolutionCommand or similar.
+            _logger.Information(
+                "D-skill expansion: tamer {TamerId} eligible to use item {ItemId} (rank {Rank}) on partner {PartnerType}, but stat-mutation not implemented; declining consume.",
+                client.TamerId, targetItem.ItemId, cfg.ExpansionRank, client.Partner.CurrentType);
+            client.Send(new SystemMessagePacket($"D-skill expansion is not yet implemented on this server."));
+            client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type));
+            return Task.CompletedTask;
         }
 
         private async Task IncreaseInventorySlots(GameClient client, short itemSlot, ItemModel targetItem)

@@ -6,6 +6,13 @@ namespace DigitalWorldOnline.Commons.Models.Base
     public partial class ItemListModel
     {
         /// <summary>
+        /// Bin-driven default sizes by ItemListEnum, populated at boot from DMBase.bin.
+        /// When set for a given enum, overrides the hardcoded GeneralSizeEnum default.
+        /// Currently consumed for AccountWarehouse (DMBase.bin section 7 MaxShareStash).
+        /// </summary>
+        public static readonly Dictionary<ItemListEnum, byte> BinDrivenDefaults = new();
+
+        /// <summary>
         /// Unique sequential identifier.
         /// </summary>
         public long Id { get; private set; }
@@ -81,7 +88,10 @@ namespace DigitalWorldOnline.Commons.Models.Base
                     break;
 
                 case ItemListEnum.AccountWarehouse:
-                    Size = (byte)GeneralSizeEnum.InitialAccountWarehouse;
+                    // DMBase.bin section 7 MaxShareStash overrides the hardcoded default.
+                    Size = BinDrivenDefaults.TryGetValue(ItemListEnum.AccountWarehouse, out var shareSize)
+                        ? shareSize
+                        : (byte)GeneralSizeEnum.InitialAccountWarehouse;
                     break;
 
                 case ItemListEnum.CashWarehouse:

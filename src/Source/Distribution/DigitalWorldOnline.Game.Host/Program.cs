@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.GameAssets.Mapping;
 using DigitalWorldOnline.Application.Admin.Repositories;
 using DigitalWorldOnline.Application.Extensions;
@@ -51,7 +52,7 @@ namespace DigitalWorldOnline.Game
             AppDomain.CurrentDomain.UnhandledException += UnhandledExceptionHandler;
             Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
 
-            return Host.CreateDefaultBuilder(args)
+            var host = Host.CreateDefaultBuilder(args)
                 .UseSerilog()
                 .UseEnvironment("Development")
                 .ConfigureServices((context, services) =>
@@ -81,6 +82,8 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<StatusManager>();
                     services.AddSingleton<ExpManager>();
                     services.AddSingleton<PartyManager>();
+                    services.AddSingleton<FatigueService>();   // FATIGUE_HOOK
+                    services.AddSingleton<GuildLevelService>();
 
                     services.AddSingleton<EventQueueManager>();
                     
@@ -91,6 +94,12 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<AssetsLoader>();
                     services.AddSingleton<ConfigsLoader>();
                     services.AddSingleton<GameMasterCommandsProcessor>();
+
+                    // Static-data bin loaders (Phase 1 — eagerly loaded below after Build()).
+                    // Each replaces a former DB-backed query handler with an in-memory lookup.
+                    services.AddSingleton<DMBaseBinLoader>();
+                    services.AddSingleton<DigimonListBinLoader>();
+                    services.AddSingleton<DigimonEvoBinLoader>();
 
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
                     services.AddSingleton<IProcessor, GamePacketProcessor>();
@@ -112,6 +121,35 @@ namespace DigitalWorldOnline.Game
                     hostConfig.AddEnvironmentVariables("DSO_");
                 })
                 .Build();
+
+            // Phase 1: eagerly load static-data bins so a missing/corrupt file fails fast at
+            // boot rather than mid-flight when the AssetsLoader first asks for it. Each loader
+            // satisfies one or more former DB-backed asset queries.
+            var dmBase = host.Services.GetRequiredService<DMBaseBinLoader>().Load();
+            var digimonList = host.Services.GetRequiredService<DigimonListBinLoader>().Load();
+            var digimonEvo = host.Services.GetRequiredService<DigimonEvoBinLoader>().Load();
+
+            // DMBase.bin section 7 MaxShareStash drives the AccountWarehouse default size
+            // so the server matches what v487 client expects (Warehouse.cpp:81 reads s_nMaxShareStash).
+            DigitalWorldOnline.Commons.Models.Base.ItemListModel.BinDrivenDefaults[
+                DigitalWorldOnline.Commons.Enums.ItemListEnum.AccountWarehouse] = (byte)dmBase.Limit.MaxShareStash;
+            var serilog = host.Services.GetRequiredService<ILogger>();
+            serilog.Information(
+                "Loaded DMBase.bin (all 11 sections): {TamerStats} tamer-level + {DigimonStats} digimon-rank-level + " +
+                "{Maps} map-config + {JumpItems} jump-items + {GuildLevels} guild-levels + " +
+                "{Stores} person-store-objs + {Penalties} play-penalty + {EvoStages} evo-stage-apply + " +
+                "{EvoMax} digimon-evo-max + {DskillOpen} dskill-open-expansion (party/limit single structs)",
+                dmBase.TamerStats.Count, dmBase.DigimonStats.Count,
+                dmBase.MapInfo.Count, dmBase.JumpBusterDestinations.Count, dmBase.GuildLevels.Count,
+                dmBase.PersonStore.Objects.Count, dmBase.PlayPenalty.Count, dmBase.EvolutionStageApply.Count,
+                dmBase.DigimonEvoMaxLevel.Count, dmBase.DskillOpenExpansion.Count);
+            serilog.Information(
+                "Loaded Digimon_List.bin: {Count} digimon entries", digimonList.ByType.Count);
+            serilog.Information(
+                "Loaded DigimonEvo.bin: {Count} evolution trees, {Lines} total evolution lines",
+                digimonEvo.ByType.Count, digimonEvo.ByType.Values.Sum(e => e.Lines.Count));
+
+            return host;
         }
 
         private static void AddAutoMapper(IServiceCollection services)

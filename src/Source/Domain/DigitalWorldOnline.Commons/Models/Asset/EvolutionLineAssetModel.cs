@@ -42,6 +42,13 @@
         public int RequiredAmount { get; private set; }
 
         /// <summary>
+        /// Per-slot max skill levels (from <c>DMBase.bin</c> section 12). Null when sourced
+        /// from the legacy DB path; bin-backed handlers populate this. Mapped from
+        /// <c>EvolutionLineAssetDTO.SkillMaxLevels</c> via AutoMapper.
+        /// </summary>
+        public byte[]? SkillMaxLevels { get; set; }
+
+        /// <summary>
         /// Available stages.
         /// </summary>
         public List<EvolutionStageAssetModel> Stages { get; private set; }

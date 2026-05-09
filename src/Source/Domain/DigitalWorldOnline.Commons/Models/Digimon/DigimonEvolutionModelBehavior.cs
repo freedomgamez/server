@@ -51,6 +51,19 @@
         {
             Id = id;
         }
+
+        /// <summary>
+        /// Propagates per-slot skill max-levels from the asset loader (sourced from
+        /// <c>DMBase.bin</c> section 12, DigimonEvoMaxLevel) to each skill in this evolution.
+        /// Sets only as many skills as caps are provided; extra slots keep their default.
+        /// </summary>
+        public void SetSkillMaxLevels(IReadOnlyList<byte> caps)
+        {
+            if (caps == null) return;
+            int n = Math.Min(caps.Count, Skills.Count);
+            for (int i = 0; i < n; i++)
+                Skills[i].SetMaxLevel(caps[i]);
+        }
         /// <summary>
         /// Serializes the object into byte array.
         /// </summary>

@@ -34,6 +34,8 @@ public sealed record DigimonEvoEntry(
 /// </summary>
 /// <param name="Type">The digimon type this slot evolves you into.</param>
 /// <param name="EvoSlot">Slot number (1 = base/Rookie, 2 = Champion, etc).</param>
+/// <param name="EnableSlot">0 = closed/unavailable; non-zero = enabled. Server should refuse unlocks for closed slots.</param>
+/// <param name="OpenQualification">NEED_QUALITICATION enum: 0=NONE, 1=PARTNERMON, 2=ROYAL_KNIGHT, 3=XAI_SYSTEM.</param>
 /// <param name="OpenLevel">Partner level required to unlock this slot.</param>
 /// <param name="OpenQuest">Quest required to unlock.</param>
 /// <param name="UseItem">Item consumed to evolve.</param>
@@ -41,6 +43,8 @@ public sealed record DigimonEvoEntry(
 public sealed record DigimonEvoLine(
     int Type,
     ushort EvoSlot,
+    ushort EnableSlot,
+    ushort OpenQualification,
     ushort OpenLevel,
     ushort OpenQuest,
     ushort UseItem,

@@ -378,6 +378,12 @@ namespace DigitalWorldOnline.Commons.Enums.PacketProcessor
         SpiritCraft = 3240,
 
         /// <summary>
+        /// D-Skill expansion: raise per-skill cap on a partner using a Type-202 item.
+        /// pDigimon::DigimonSkillLimitOpen — gated client-side by SDM_DIGIMONSKILL_LV_EXPEND_20181206.
+        /// </summary>
+        DigimonSkillLimitOpen = 3245,
+
+        /// <summary>
         /// Moves an item to another position/storage.
         /// </summary>
         MoveItem = 3904,

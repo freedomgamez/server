@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
@@ -17,17 +18,26 @@ namespace DigitalWorldOnline.Game.PacketProcessors
     {
         public GameServerPacketEnum Type => GameServerPacketEnum.EvolutionUnlock;
 
+        // NEED_QUALITICATION enum from client (LibProj/CsFileTable/DigimonEvolveObj.h:8).
+        private const int Qualification_NoNeed     = 0;
+        private const int Qualification_PartnerMon = 1;
+        private const int Qualification_RoyalKnight = 2;
+        private const int Qualification_XaiSystem  = 3;
+
         private readonly AssetsLoader _assets;
+        private readonly DigimonEvoBinLoader _digimonEvo;
         private readonly ISender _sender;
         private readonly ILogger _logger;
         private readonly MapServer _mapServer;
         public EvolutionUnlockPacketProcessor(
             AssetsLoader assets,
+            DigimonEvoBinLoader digimonEvo,
             ISender sender,
             ILogger logger,
             MapServer mapServer)
         {
             _assets = assets;
+            _digimonEvo = digimonEvo;
             _sender = sender;
             _logger = logger;
             _mapServer = mapServer;
@@ -52,6 +62,32 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 _logger.Error($"Invalid evolution info for type {client.Partner.BaseType} and line {evolution.Type}.");
                 client.Send(new SystemMessagePacket($"Invalid evolution info for type {client.Partner.BaseType} and line {evolution.Type}."));
                 return;
+            }
+
+            // DigimonEvo.bin §EnableSlot/OpenQualification gates: server-side enforcement.
+            // Client skips closed slots (DigimonUser.cpp:2355, :2821); we mirror that to block
+            // exploit unlocks of slots the client wouldn't even surface.
+            var binTree = _digimonEvo.Data.FindByType(client.Partner.BaseType);
+            var binLine = binTree?.Lines.FirstOrDefault(l => l.Type == evolution.Type);
+            if (binLine != null)
+            {
+                if (binLine.EnableSlot == 0)
+                {
+                    _logger.Warning("Tamer {TamerId} tried to unlock closed evo slot {Type} (EnableSlot=0).",
+                        client.TamerId, evolution.Type);
+                    client.Send(new SystemMessagePacket("That evolution slot is not available."));
+                    return;
+                }
+                if (binLine.OpenQualification == Qualification_XaiSystem)
+                {
+                    // v487 build with SDM_TAMER_XGUAGE_20180628 has Xai-system gating; the server
+                    // doesn't yet track Xai eligibility per-tamer, so for safety refuse rather
+                    // than silently allow. Replace with a real check when Xai state is plumbed.
+                    _logger.Information("Tamer {TamerId}: evo {Type} requires Xai system (qual={Qual}); refusing pending Xai-state plumbing.",
+                        client.TamerId, evolution.Type, binLine.OpenQualification);
+                    client.Send(new SystemMessagePacket("This evolution requires the Xai system."));
+                    return;
+                }
             }
 
             if (itemSlot <= 150)

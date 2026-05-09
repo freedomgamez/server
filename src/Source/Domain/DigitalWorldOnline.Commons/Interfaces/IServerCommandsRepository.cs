@@ -26,6 +26,8 @@ namespace DigitalWorldOnline.Commons.Interfaces
 
         Task UpdateGuildNoticeAsync(long guildId, string newMessage);
 
+        Task UpdateGuildLevelAsync(long guildId, byte level, int currentExperience);
+
         Task UpdateGuildAuthorityAsync(GuildAuthorityModel authority);
 
         Task DeleteGuildAsync(long guildId);

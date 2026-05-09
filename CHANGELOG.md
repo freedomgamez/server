@@ -2,6 +2,44 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Game.Host: DMBase.bin fully wired (all 11 sections)
+
+Phase-2 of the bin migration. `DMBase.bin` now backs every server feature it describes, with each unwired field documented as N/A only after the v487 client was grepped to verify no consumer exists. New `DMBaseBinLoader` parses all 11 sections at boot and replaces the matching DB-backed query handlers.
+
+**Sections wired to existing features:**
+
+- §1, §2 — `TamerLevelingAssetsQuery`, `DigimonLevelingAssetsQuery` already migrated; this commit also fixes a latent bug from the original migration: the bin's leveling-rank key for §2 is `s_nDigimonType` (offset 392, byte, values 1..4), not `s_dwCharSize` (offset 394, ushort, visual-scale percentages). The previous loader read the wrong offset, so `digimon.BaseInfo.ScaleType` carried percentages and `ExpManager`'s lookup `DigimonLevelInfo.Where(x => x.ScaleType == digimon.BaseInfo.ScaleType)` returned 0 rows for every digimon — silent breakage of digimon EXP/level-up. Loader now reads offset 392; handler also sets `DigimonLevelStatusAssetDTO.StatusId = rec.Id` (was unset, defaulted to 0; `StatusManager.GetDigimonBaseStatus` queries by `StatusId` and `.Single()` was throwing inside `InitialInformationPacketProcessor`, hanging the loading screen after character select).
+- §3 — `MapInfo.ShoutSec` drives a per-map shout cooldown in `ShoutMessagePacketProcessor` (`ConcurrentDictionary<long, DateTime>` per-tamer state). `EnableCheckMacro` is a client-side CAPTCHA flag (`MacroProtectContents.cpp:102`) — bin loaded for parity, no server feature.
+- §4 — `JumpBoosterPacketProcessor` enforces the bin allowlist of `(item → destinationMap)` pairs; refuses with log + system message on mismatch.
+- §6 — `MaxGuildPerson` cap enforced on member-add (`GuildInviteAcceptPacketProcessor`); new `GuildLevelService` implements server-driven guild auto-leveling (validates `Fame`/`NeedPerson`/`MasterLevel` against next-level requirements, bumps level, persists via new `UpdateGuildLevelCommand` + `IServerCommandsRepository.UpdateGuildLevelAsync`). `GuildModelBehavior.AddExperience` + `LevelUp` added. Hooked from `QuestDeliverPacketProcessor` (+1 fame per quest delivery — minimal feeder; tune as desired).
+- §7 — `MaxTacticsHouse` (DigimonArchive cap) and `MaxWareHouse` checked in the relevant `ItemConsumePacketProcessor` slot-expand paths. `MaxShareStash` drives `AccountWarehouse` initial size via a new `ItemListModel.BinDrivenDefaults` static dictionary, set once at boot in `Program.cs`. `UnionStore`/`ConsumeXG`/`ChargeXG` documented N/A — no v487 client consumer (verified by grep of `~/vm/dmoclient-main`).
+- §8 — `PersonStore.PersonCharge` applies a 2% commission on consigned-shop sales (`ConsignedShopPurchaseItemPacketProcessor`). `PersonStore.StoreDist` enforces a server-side proximity gate when a player tries to open a personal shop (`TamerShopOpenPacketProcessor`) — refuses if another shop tamer is within `StoreDist`, mirroring the client check at `DataMng.cpp:3696` but without trusting a manipulated client.
+- §9 — `PlayPenalty` (Korean-region playtime fatigue) implemented as `FatigueService` (`Managers/FatigueService.cs`). New `Fatigue:Enabled` config key (default off — see `appsettings.Development.Example.json`). `FATIGUE_HOOK` marker comment is searchable across the codebase (~70 occurrences, 23 sites). Wired through every reward call-site: `ExpManager.ReceiveTamerExperience` and `ReceiveDigimonExperience` accept a `decimal fatigueMultiplier = 1m`; all 17 invocations across `MapServer*Operation`, `EventServer*Operation`, `DungeonsServer*Operation`, `QuestDeliverPacketProcessor`, and `ItemConsumePacketProcessor` pass `_fatigueService.GetMultipliers(client).exp`. Drop-side: `BitDropReward` and `ItemDropReward` in all three monster-operation files short-circuit on `drop == 0` and scale chance otherwise. GM-issued exp grants intentionally bypass fatigue. `GameClient.SessionStart` added to track session play-time.
+- §11 — `StatusApplyAssetQuery` migrated from DB to bin; bin's `EvolutionStageApply` table replaces the 17-row `Asset_StatusApply` table that was a hidden mirror.
+- §12 — `DigimonEvoMaxLevel` plumbed via new `EvolutionLineAssetDTO.SkillMaxLevels byte[]` field; per-evolution-stage skill caps flow from the bin through `DigimonEvolutionAssetsQueryHandler` into `DigimonEvolutionSkillModel.MaxLevel` (new `SetMaxLevel` setter; new `DigimonEvolutionModelBehavior.SetSkillMaxLevels`; both `AddEvolutions` overloads call it).
+- §13 — D-skill expansion items (Type 202, "Skill DigiCode") flow through a dedicated packet `pDigimon::DigimonSkillLimitOpen` (3245), NOT generic ItemConsume — verified in `cCliGameSkill.cpp:3038` (gated by `SDM_DIGIMONSKILL_LV_EXPEND_20181206`, defined in v487). New `DigimonSkillLimitOpenPacketProcessor`: validates inventory item, looks up bin §13 entry by `Section`, validates partner's evolution stage against `AllowedEvoTypes`, raises every skill slot's `MaxLevel` by `5 × ExpansionRank` (rank 1/2/3 → +5/+10/+15; the bin doesn't carry the delta, this is a Korean-MMO convention), persists via `UpdateEvolutionCommand`, decrements the item, and replies with the cEvoUnit shape (new `DigimonSkillLimitOpenResultPacket` writes the 19-byte `cEvoUnit` struct: `bitfield#1: SkillExp(26) | SkillExpLevel(6)`, `bitfield#2: SlotState(4) | MaxSkillLevelStep(8) | Reserved(20)`, `SkillPoint(1)`, `SkillLevel[5]`, `SkillMaxLevel[5]`). The pre-existing ItemConsume `Type==202` branch is kept as exploit-protection — refuses + logs since the legitimate path is the dedicated packet.
+
+**Sections documented N/A in v487** (loaded for parity; no server feature, no client consumer): §3 `EnableCheckMacro`, §5 `PartyDist`, §6 `IncMember`/`ItemNo*`/`MaxGuild2Master`, §7 `UnionStore`/`ConsumeXG`/`ChargeXG`, §8 `EmploymentCharge`/`Objects`. Each was verified by client-source grep before being marked N/A — never inferred from field name alone.
+
+## DigimonEvo.bin: missing fields wired + server-side gates
+
+Audit caught 4 latent bugs from the original Phase-1 migration where bin fields were parsed by the loader but never propagated into the DTO; consumers saw default zeros and silently misbehaved.
+
+- **`SlotLevel ← line.EvoSlot`** — `QuestDeliverPacketProcessor` indexes `Tamer.Partner.Evolutions[evolutionQuest.SlotLevel - 1]`. With `SlotLevel = 0` (default) the access becomes `Evolutions[-1]` and throws. Property's `private set` was opening only via AutoMapper from the DB path; changed to `public set` on `EvolutionLineAssetDTO` and the bin handlers populate it.
+- **`UnlockItemSection ← line.UseItem` + `UnlockItemSectionAmount ← line.UseItemNum`** — `EvolutionUnlockPacketProcessor` reads these to decide which inventory items to consume for the unlock. With both 0 the item-based unlock path was effectively broken; only the quest-based path (`UnlockQuestId == questId && UnlockItemSection == 0`) worked.
+
+Two new server-side gates added (real exploits prevented):
+
+- **`m_nEnableSlot == 0` refused** — bin offset 88. Client `DigimonUser.cpp:2355,:2821` skips closed slots entirely; without server enforcement, a crafted packet could unlock them. v487 bin has 14 closed lines. `EvolutionUnlockPacketProcessor` now refuses + logs.
+- **`m_nOpenQualification == 3 (XAI_SYSTEM)` refused** — bin offset 90. NEED_QUALITICATION enum from `LibProj/CsFileTable/DigimonEvolveObj.h:8`: `0=NONE, 1=PARTNERMON, 2=ROYAL_KNIGHT, 3=XAI_SYSTEM`. The Xai system requires per-tamer eligibility state that isn't tracked yet. v487 bin has 47 lines requiring Xai. Refused pending Xai-state plumbing.
+
+Both `DigimonEvo.cs` POCO and `DigimonEvoBinLoader.cs` updated in both `Application.GameAssets` and `Application.CharacterAssets`.
+
+## Memory of decisions
+
+- **Verify in client source first** — the audit caught two cases where a field name suggested one meaning but the v487 consumer used a different one (`s_nDigimonType` vs `s_dwCharSize`; `sPLAY_PANELTY` is fatigue not death-penalty). Methodology: grep `~/vm/dmoclient-main/{DProject,common_vs2019,LibProj}` for `Get<Field>()` / `m_<field>` / `s_<field>` / namespace-qualified usage. If 0 references after #ifdef checks, document N/A. Never guess from name.
+- **Defaults stay safe** — fatigue is off, guild auto-level grants tiny amounts (1 fame/quest), D-skill cap delta uses a well-defined convention rather than a guess. All toggles ship "off" in the example config.
+
 ## Initial info packet (`InitialInfoPacket`)
 
 Wire format alignment with v487 client (`Domain/.../Packets/GameServer/InitialInfoPacket.cs`):

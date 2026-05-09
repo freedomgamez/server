@@ -26,6 +26,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         private readonly StatusManager _statusManager;
         private readonly ExpManager _expManager;
+        private readonly FatigueService _fatigueService;   // FATIGUE_HOOK
+        private readonly GuildLevelService _guildLevelService;
         private readonly AssetsLoader _assets;
         private readonly MapServer _mapServer;
         private readonly ILogger _logger;
@@ -34,6 +36,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         public QuestDeliverPacketProcessor(
             StatusManager statusManager,
             ExpManager expManager,
+            FatigueService fatigueService,   // FATIGUE_HOOK
+            GuildLevelService guildLevelService,
             AssetsLoader assets,
             MapServer mapServer,
             ILogger logger,
@@ -41,6 +45,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         {
             _statusManager = statusManager;
             _expManager = expManager;
+            _fatigueService = fatigueService;   // FATIGUE_HOOK
+            _guildLevelService = guildLevelService;
             _mapServer = mapServer;
             _assets = assets;
             _logger = logger;
@@ -67,6 +73,17 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             DeliverItems(client, questId, questInfo);
             ReturnSupplies(client, questId, questInfo);
             QuestRewards(client, questInfo);
+
+            // DMBase.bin §6: grant a small amount of guild experience for each quest the
+            // member completes, then check whether bin requirements for the next level are
+            // met (server-driven auto-leveling — v487 has no GUILD_RENEWAL UI flow).
+            if (client.Tamer.Guild != null)
+            {
+                var master = client.Tamer.Guild.Master?.CharacterId == client.TamerId
+                    ? client.Tamer
+                    : null;
+                _ = _guildLevelService.AddExperienceAndTryLevelUp(client.Tamer.Guild, master, 1);
+            }
 
             var evolutionQuest = _assets.EvolutionInfo
                .FirstOrDefault(x => x.Type == client.Partner.BaseType)?
@@ -262,11 +279,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             {
                 _logger.Verbose($"Character {client.TamerId} received quest {questReward.Quest.QuestId} exp reward.");
 
+                var fatigueExp = _fatigueService.GetMultipliers(client).exp;   // FATIGUE_HOOK
                 var tamerExpToReceive = rewardObject.Amount / 10; //TODO: +bonus
-                var tamerResult = ReceiveTamerExp(client.Tamer, tamerExpToReceive);
+                var tamerResult = ReceiveTamerExp(client.Tamer, tamerExpToReceive, fatigueExp);
 
                 var partnerExpToReceive = rewardObject.Amount; //TODO: +bonus
-                var partnerResult = ReceivePartnerExp(client.Partner, partnerExpToReceive);
+                var partnerResult = ReceivePartnerExp(client.Partner, partnerExpToReceive, fatigueExp);
 
                 client.Send(
                     new ReceiveExpPacket(
@@ -320,9 +338,9 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             });
         }
 
-        private ReceiveExpResult ReceiveTamerExp(CharacterModel tamer, long tamerExpToReceive)
+        private ReceiveExpResult ReceiveTamerExp(CharacterModel tamer, long tamerExpToReceive, decimal fatigueMultiplier = 1m)   // FATIGUE_HOOK
         {
-            var tamerResult = _expManager.ReceiveTamerExperience(tamerExpToReceive, tamer);
+            var tamerResult = _expManager.ReceiveTamerExperience(tamerExpToReceive, tamer, fatigueMultiplier);
 
             if (tamerResult.LevelGain > 0)
             {
@@ -341,9 +359,9 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             return tamerResult;
         }
 
-        private ReceiveExpResult ReceivePartnerExp(DigimonModel partner, long partnerExpToReceive)
+        private ReceiveExpResult ReceivePartnerExp(DigimonModel partner, long partnerExpToReceive, decimal fatigueMultiplier = 1m)   // FATIGUE_HOOK
         {
-            var partnerResult = _expManager.ReceiveDigimonExperience(partnerExpToReceive, partner);
+            var partnerResult = _expManager.ReceiveDigimonExperience(partnerExpToReceive, partner, fatigueMultiplier);
 
             if (partnerResult.LevelGain > 0)
             {

@@ -291,7 +291,8 @@ namespace DigitalWorldOnline.GameHost.EventsServer
                     tamerExpToReceive = 0;
 
                 if (tamerExpToReceive > 100) tamerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                var tamerResult = ReceiveTamerExp(targetClient.Tamer, tamerExpToReceive);
+                var fatigueExp = _fatigueService.GetMultipliers(targetClient).exp;   // FATIGUE_HOOK
+                var tamerResult = ReceiveTamerExp(targetClient.Tamer, tamerExpToReceive, fatigueExp);
 
                 var partnerExpToReceive = (long)(CalculateExperience(tamer.Partner.Level, mob.Level, mob.ExpReward.DigimonExperience) * expBonusMultiplier); //TODO: +bonus
 
@@ -299,7 +300,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
                     partnerExpToReceive = 0;
 
                 if (partnerExpToReceive > 100) partnerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                var partnerResult = ReceivePartnerExp(targetClient.Partner, mob, partnerExpToReceive);
+                var partnerResult = ReceivePartnerExp(targetClient.Partner, mob, partnerExpToReceive, fatigueExp);   // FATIGUE_HOOK
 
                 targetClient.Send(
                     new ReceiveExpPacket(
@@ -389,9 +390,15 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             if (targetClient == null)
                 return;
 
+            // FATIGUE_HOOK: scale drop chance by playtime-fatigue multiplier (DMBase.bin section 9).
+            var fatigueDrop = _fatigueService.GetMultipliers(targetClient).drop;
+            if (fatigueDrop <= 0m)
+                return;
+            double fatigueDropD = (double)fatigueDrop;
+
             var bitsReward = mob.DropReward.BitsDrop;
 
-            if (bitsReward != null && bitsReward.Chance >= UtilitiesFunctions.RandomDouble())
+            if (bitsReward != null && bitsReward.Chance * fatigueDropD >= UtilitiesFunctions.RandomDouble())
             {
                 var drop = _dropManager.CreateBitDrop(
                     targetClient.TamerId,
@@ -428,7 +435,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
                 var possibleDrops = itemsReward.OrderBy(x => Guid.NewGuid()).ToList();
                 foreach (var itemDrop in possibleDrops)
                 {
-                    if (itemDrop.Chance >= UtilitiesFunctions.RandomDouble())
+                    if (itemDrop.Chance * fatigueDropD >= UtilitiesFunctions.RandomDouble())   // FATIGUE_HOOK
                     {
                         var drop = _dropManager.CreateItemDrop(
                             targetClient.Tamer.Id,

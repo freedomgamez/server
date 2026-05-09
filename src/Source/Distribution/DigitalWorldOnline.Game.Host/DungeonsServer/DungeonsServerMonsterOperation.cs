@@ -685,7 +685,8 @@ namespace DigitalWorldOnline.GameHost
                     tamerExpToReceive = 0;
 
                 if (tamerExpToReceive > 100) tamerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                var tamerResult = ReceiveTamerExp(targetClient.Tamer, tamerExpToReceive);
+                var fatigueExp = _fatigueService.GetMultipliers(targetClient).exp;   // FATIGUE_HOOK
+                var tamerResult = ReceiveTamerExp(targetClient.Tamer, tamerExpToReceive, fatigueExp);
 
                 var partnerExpToReceive = (long)(CalculateExperience(tamer.Partner.Level, mob.Level, mob.ExpReward.DigimonExperience) * expBonusMultiplier); //TODO: +bonus
 
@@ -693,7 +694,7 @@ namespace DigitalWorldOnline.GameHost
                     partnerExpToReceive = 0;
 
                 if (partnerExpToReceive > 100) partnerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                var partnerResult = ReceivePartnerExp(targetClient.Partner, mob, partnerExpToReceive);
+                var partnerResult = ReceivePartnerExp(targetClient.Partner, mob, partnerExpToReceive, fatigueExp);   // FATIGUE_HOOK
 
                 targetClient.Send(
                     new ReceiveExpPacket(
@@ -799,13 +800,14 @@ namespace DigitalWorldOnline.GameHost
                     if (partyMemberClient == null || partyMemberId == targetClient.TamerId)
                         continue;
 
+                    var fatiguePartyExp = _fatigueService.GetMultipliers(partyMemberClient).exp;   // FATIGUE_HOOK
                     tamerExpToReceive = (long)((double)(mob.ExpReward.TamerExperience * 0.80)); //TODO: +bonus
                     if (tamerExpToReceive > 100) tamerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                    tamerResult = ReceiveTamerExp(partyMemberClient.Tamer, tamerExpToReceive);
+                    tamerResult = ReceiveTamerExp(partyMemberClient.Tamer, tamerExpToReceive, fatiguePartyExp);
 
                     partnerExpToReceive = (long)((double)(mob.ExpReward.DigimonExperience) * 0.80); //TODO: +bonus
                     if (partnerExpToReceive > 100) partnerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                    partnerResult = ReceivePartnerExp(partyMemberClient.Partner, mob, partnerExpToReceive);
+                    partnerResult = ReceivePartnerExp(partyMemberClient.Partner, mob, partnerExpToReceive, fatiguePartyExp);   // FATIGUE_HOOK
 
                     partyMemberClient.Send(
                         new PartyReceiveExpPacket(
@@ -855,13 +857,14 @@ namespace DigitalWorldOnline.GameHost
                     if (partyMemberClient == null || partyMemberId == targetClient.TamerId)
                         continue;
 
+                    var fatiguePartyExp = _fatigueService.GetMultipliers(partyMemberClient).exp;   // FATIGUE_HOOK
                     tamerExpToReceive = (long)((double)(mob.ExpReward.TamerExperience * 0.80)); //TODO: +bonus
                     if (tamerExpToReceive > 100) tamerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                    tamerResult = ReceiveTamerExp(partyMemberClient.Tamer, tamerExpToReceive);
+                    tamerResult = ReceiveTamerExp(partyMemberClient.Tamer, tamerExpToReceive, fatiguePartyExp);
 
                     partnerExpToReceive = (long)((double)(mob.ExpReward.DigimonExperience) * 0.80); //TODO: +bonus
                     if (partnerExpToReceive > 100) partnerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                    partnerResult = ReceivePartnerExp(partyMemberClient.Partner, mob, partnerExpToReceive);
+                    partnerResult = ReceivePartnerExp(partyMemberClient.Partner, mob, partnerExpToReceive, fatiguePartyExp);   // FATIGUE_HOOK
 
                     partyMemberClient.Send(
                         new PartyReceiveExpPacket(
@@ -902,9 +905,13 @@ namespace DigitalWorldOnline.GameHost
 
         private void BitDropReward(GameMap map, MobConfigModel mob, GameClient? targetClient)
         {
+            // FATIGUE_HOOK
+            var fatigueDrop = (double)_fatigueService.GetMultipliers(targetClient).drop;
+            if (fatigueDrop <= 0) return;
+
             var bitsReward = mob.DropReward.BitsDrop;
 
-            if (bitsReward != null && bitsReward.Chance >= UtilitiesFunctions.RandomDouble())
+            if (bitsReward != null && bitsReward.Chance * fatigueDrop >= UtilitiesFunctions.RandomDouble())
             {
                 if (targetClient.Tamer.HasAura && targetClient.Tamer.Aura.ItemInfo.Section == 2100)
                 {
@@ -944,6 +951,10 @@ namespace DigitalWorldOnline.GameHost
             if (!mob.DropReward.Drops.Any())
                 return;
 
+            // FATIGUE_HOOK
+            var fatigueDrop = (double)_fatigueService.GetMultipliers(targetClient).drop;
+            if (fatigueDrop <= 0) return;
+
             var itemsReward = new List<ItemDropConfigModel>();
             itemsReward.AddRange(mob.DropReward.Drops);
             itemsReward.RemoveAll(x => _assets.QuestItemList.Contains(x.ItemId));
@@ -967,7 +978,7 @@ namespace DigitalWorldOnline.GameHost
                 var possibleDrops = itemsReward.OrderBy(x => Guid.NewGuid()).ToList();
                 foreach (var itemDrop in possibleDrops)
                 {
-                    if (itemDrop.Chance >= UtilitiesFunctions.RandomDouble())
+                    if (itemDrop.Chance * fatigueDrop >= UtilitiesFunctions.RandomDouble())   // FATIGUE_HOOK
                     {
                         if (targetClient.Tamer.HasAura && targetClient.Tamer.Aura.ItemInfo.Section == 2100)
                         {
@@ -1679,7 +1690,8 @@ namespace DigitalWorldOnline.GameHost
                     tamerExpToReceive = 0;
 
                 if (tamerExpToReceive > 100) tamerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                var tamerResult = ReceiveTamerExp(targetClient.Tamer, tamerExpToReceive);
+                var fatigueExp = _fatigueService.GetMultipliers(targetClient).exp;   // FATIGUE_HOOK
+                var tamerResult = ReceiveTamerExp(targetClient.Tamer, tamerExpToReceive, fatigueExp);
 
                 var partnerExpToReceive = (long)(CalculateExperience(tamer.Partner.Level, mob.Level, mob.ExpReward.DigimonExperience) * expBonusMultiplier); //TODO: +bonus
 
@@ -1687,7 +1699,7 @@ namespace DigitalWorldOnline.GameHost
                     partnerExpToReceive = 0;
 
                 if (partnerExpToReceive > 100) partnerExpToReceive += UtilitiesFunctions.RandomInt(-15, 15);
-                var partnerResult = ReceivePartnerExp(targetClient.Partner, mob, partnerExpToReceive);
+                var partnerResult = ReceivePartnerExp(targetClient.Partner, mob, partnerExpToReceive, fatigueExp);   // FATIGUE_HOOK
 
                 targetClient.Send(
                     new ReceiveExpPacket(
@@ -1734,9 +1746,13 @@ namespace DigitalWorldOnline.GameHost
 
         private void BitDropReward(GameMap map, SummonMobModel mob, GameClient? targetClient)
         {
+            // FATIGUE_HOOK
+            var fatigueDrop = (double)_fatigueService.GetMultipliers(targetClient).drop;
+            if (fatigueDrop <= 0) return;
+
             var bitsReward = mob.DropReward.BitsDrop;
 
-            if (bitsReward != null && bitsReward.Chance >= UtilitiesFunctions.RandomDouble())
+            if (bitsReward != null && bitsReward.Chance * fatigueDrop >= UtilitiesFunctions.RandomDouble())
             {
                 if (targetClient.Tamer.HasAura && targetClient.Tamer.Aura.ItemInfo.Section == 2100)
                 {
@@ -1776,6 +1792,10 @@ namespace DigitalWorldOnline.GameHost
             if (!mob.DropReward.Drops.Any())
                 return;
 
+            // FATIGUE_HOOK
+            var fatigueDrop = (double)_fatigueService.GetMultipliers(targetClient).drop;
+            if (fatigueDrop <= 0) return;
+
             var itemsReward = new List<SummonMobItemDropModel>();
             itemsReward.AddRange(mob.DropReward.Drops);
             itemsReward.RemoveAll(x => _assets.QuestItemList.Contains(x.ItemId));
@@ -1799,7 +1819,7 @@ namespace DigitalWorldOnline.GameHost
                 var possibleDrops = itemsReward.OrderBy(x => Guid.NewGuid()).ToList();
                 foreach (var itemDrop in possibleDrops)
                 {
-                    if (itemDrop.Chance >= UtilitiesFunctions.RandomDouble())
+                    if (itemDrop.Chance * fatigueDrop >= UtilitiesFunctions.RandomDouble())   // FATIGUE_HOOK
                     {
                         if (targetClient.Tamer.HasAura && targetClient.Tamer.Aura.ItemInfo.Section == 2100)
                         {

@@ -57,10 +57,17 @@ namespace DigitalWorldOnline.Game.Managers
 
         public ReceiveExpResult ReceiveTamerExperience(
             long receivedExp,
-            CharacterModel tamer
+            CharacterModel tamer,
+            decimal fatigueMultiplier = 1m   // FATIGUE_HOOK — caller passes FatigueService.GetMultipliers(client).exp; 1.0 when disabled
         )
         {
             if (tamer.Level >= 120) return new ReceiveExpResult(0, true);
+
+            // FATIGUE_HOOK: scale incoming exp by fatigue multiplier (DMBase.bin section 9).
+            if (fatigueMultiplier <= 0m)
+                return new ReceiveExpResult(0, true);   // level-3 fatigue: no exp at all
+            if (fatigueMultiplier < 1m)
+                receivedExp = (long)(receivedExp * fatigueMultiplier);
 
             var tamerInfos = _assets.TamerLevelInfo
                 .Where(x => x.Type == tamer.Model)
@@ -113,10 +120,17 @@ namespace DigitalWorldOnline.Game.Managers
 
         public ReceiveExpResult ReceiveDigimonExperience(
             long receivedExp,
-            DigimonModel digimon
+            DigimonModel digimon,
+            decimal fatigueMultiplier = 1m   // FATIGUE_HOOK
         )
         {
             if (digimon.Level >= 120) return new ReceiveExpResult(0, true);
+
+            // FATIGUE_HOOK: scale partner exp by the same multiplier the tamer received.
+            if (fatigueMultiplier <= 0m)
+                return new ReceiveExpResult(0, true);
+            if (fatigueMultiplier < 1m)
+                receivedExp = (long)(receivedExp * fatigueMultiplier);
 
             var digimonInfos = _assets.DigimonLevelInfo
                 .Where(x => x.ScaleType == digimon.BaseInfo.ScaleType)

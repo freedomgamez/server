@@ -1,4 +1,5 @@
-﻿using DigitalWorldOnline.Application.Separar.Commands.Update;
+﻿using DigitalWorldOnline.Application.GameAssets.Bins;
+using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
 using DigitalWorldOnline.Application.GameAssets.Queries;
 using DigitalWorldOnline.Commons.Entities;
@@ -19,6 +20,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         public GameServerPacketEnum Type => GameServerPacketEnum.JumpBooster;
 
         private readonly MapServer _mapServer;
+        private readonly DMBaseBinLoader _dmBase;
         private readonly IConfiguration _configuration;
         private readonly ISender _sender;
         private readonly ILogger _logger;
@@ -29,12 +31,14 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         public JumpBoosterPacketProcessor(
             MapServer mapServer,
+            DMBaseBinLoader dmBase,
             IConfiguration configuration,
             ISender sender,
             ILogger logger)
         {
             _configuration = configuration;
             _mapServer = mapServer;
+            _dmBase = dmBase;
             _sender = sender;
             _logger = logger;
         }
@@ -64,10 +68,31 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             if (!vipEnabled)
             {
                 var bombItem = client.Tamer.Inventory.FindItemBySlot(slot);
-                if (!client.Tamer.Inventory.RemoveOrReduceItem(bombItem, 1, slot))
+                if (bombItem == null || bombItem.ItemId == 0)
                 {
                     client.Send(new SystemMessagePacket($"Unable to jump to {mapId}."));
                     _logger.Warning($"Invalid bomb item at slot {slot} for character {client.TamerId} jump booster.");
+                    return;
+                }
+
+                // Validate the (item -> destination) pair against DMBase.bin section 4.
+                // The client UI already filters destinations via IsUseJumpBuster (see
+                // JumpBuster.cpp:114/170) — the server mirrors that allowlist so a desynced
+                // or tampered client can't teleport to a map this bomb shouldn't reach.
+                if (!_dmBase.Data.JumpBusterDestinations.TryGetValue(bombItem.ItemId, out var allowedMaps)
+                    || !allowedMaps.Contains(mapId))
+                {
+                    client.Send(new SystemMessagePacket($"Bomb {bombItem.ItemId} cannot teleport to map {mapId}."));
+                    _logger.Warning(
+                        "Rejecting jump-booster from tamer {TamerId}: item {ItemId} not allowed to map {MapId} per DMBase.bin allowlist.",
+                        client.TamerId, bombItem.ItemId, mapId);
+                    return;
+                }
+
+                if (!client.Tamer.Inventory.RemoveOrReduceItem(bombItem, 1, slot))
+                {
+                    client.Send(new SystemMessagePacket($"Unable to jump to {mapId}."));
+                    _logger.Warning($"Failed to consume bomb item at slot {slot} for character {client.TamerId} jump booster.");
                     return;
                 }
 

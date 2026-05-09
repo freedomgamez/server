@@ -398,6 +398,8 @@ FodyWeavers.xsd
 *.sln.iml
 /.idea/.idea.DigitalWorldOnline/.idea
 /Bins/
+/Bins.zip
+/Bins*.zip
 src/Tools/NPCEditor/Util/pack03.pf
 .idea/
 *.pf

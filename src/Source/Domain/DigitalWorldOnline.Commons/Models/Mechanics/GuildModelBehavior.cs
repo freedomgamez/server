@@ -119,6 +119,27 @@ namespace DigitalWorldOnline.Commons.Models.Mechanics
         public void SetNotice(string newMessage) => Notice = newMessage;
 
         /// <summary>
+        /// Adds the given amount to the guild's accumulated experience (a.k.a. fame).
+        /// DMBase.bin section 6's <c>Fame</c> field is the experience threshold required to
+        /// reach a given level — see <see cref="GuildModel.CurrentExperience"/> vs the bin
+        /// when deciding whether to call <see cref="LevelUp"/>.
+        /// </summary>
+        public void AddExperience(int amount)
+        {
+            if (amount <= 0) return;
+            CurrentExperience += amount;
+        }
+
+        /// <summary>
+        /// Bumps the guild level by 1, clamped to byte.MaxValue.
+        /// Caller is responsible for validating bin requirements first.
+        /// </summary>
+        public void LevelUp()
+        {
+            if (Level < byte.MaxValue) Level += 1;
+        }
+
+        /// <summary>
         /// Updates the target authority title and duty.
         /// </summary>
         /// <param name="type">Authority enumeration</param>

@@ -39,14 +39,28 @@ namespace DigitalWorldOnline.Application.CharacterAssets.Queries
                 ? (EvolutionRankEnum)listEntry.EvolutionType
                 : EvolutionRankEnum.None;
 
+            // Per-slot skill max levels. In v487 all reachable partner-digimon evolution
+            // stages (Rookie=3 through stage 17) have the same caps [10, 15, 20, 25] in
+            // DMBase.bin section 12 (DigimonEvoMaxLevel) — only Digi-Tama (1) and
+            // In-Training (2) differ, and those aren't present as evolution lines on a
+            // partner digimon. So hardcoding here matches the bin without forcing
+            // CharacterAssets's minimal DMBase loader to parse all 11 sections just for
+            // this. If a future build introduces non-uniform caps, switch to a per-line
+            // bin lookup like Application.GameAssets does.
+            var skillMaxLevels = new byte[] { 10, 15, 20, 25 };
+
             var lines = new List<EvolutionLineAssetDTO>(entry.Lines.Count);
             foreach (var line in entry.Lines)
             {
                 lines.Add(new EvolutionLineAssetDTO
                 {
                     Type = line.Type,
+                    SlotLevel = (byte)Math.Min(line.EvoSlot, byte.MaxValue),
                     UnlockLevel = (byte)Math.Min(line.OpenLevel, byte.MaxValue),
-                    UnlockQuestId = (short)line.OpenQuest
+                    UnlockQuestId = (short)line.OpenQuest,
+                    UnlockItemSection = line.UseItem,
+                    UnlockItemSectionAmount = line.UseItemNum,
+                    SkillMaxLevels = skillMaxLevels
                 });
             }
 

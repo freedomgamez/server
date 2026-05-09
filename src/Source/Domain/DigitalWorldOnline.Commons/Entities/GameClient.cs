@@ -84,6 +84,10 @@ namespace DigitalWorldOnline.Commons.Entities
 
         private const int BufferSize = 16 * 1024;
 
+        // Set at connect-time; consumed by the fatigue subsystem to compute current play-time
+        // tier (DMBase.bin section 9 — sPLAY_PANELTY). Search for "FATIGUE_HOOK" for related code.
+        public DateTime SessionStart { get; private set; } = DateTime.UtcNow;
+
         public GameClient(GameServer server, Socket socket)
         {
             ReceiveBuffer = new byte[BufferSize];
@@ -91,6 +95,7 @@ namespace DigitalWorldOnline.Commons.Entities
             Server = server;
             Socket = socket;
             GameQuit = true;
+            SessionStart = DateTime.UtcNow;
         }
 
         public int MembershipUtcSeconds => MembershipExpirationDate.GetUtcSeconds();

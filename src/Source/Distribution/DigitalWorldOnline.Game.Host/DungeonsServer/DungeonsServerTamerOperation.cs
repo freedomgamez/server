@@ -811,9 +811,9 @@ namespace DigitalWorldOnline.GameHost
 
         }
 
-        private ReceiveExpResult ReceiveTamerExp(CharacterModel tamer, long tamerExpToReceive)
+        private ReceiveExpResult ReceiveTamerExp(CharacterModel tamer, long tamerExpToReceive, decimal fatigueMultiplier = 1m)   // FATIGUE_HOOK
         {
-            var tamerResult = _expManager.ReceiveTamerExperience(tamerExpToReceive, tamer);
+            var tamerResult = _expManager.ReceiveTamerExperience(tamerExpToReceive, tamer, fatigueMultiplier);
 
             if (tamerResult.LevelGain > 0)
             {
@@ -833,9 +833,9 @@ namespace DigitalWorldOnline.GameHost
             return tamerResult;
         }
 
-        private ReceiveExpResult ReceivePartnerExp(DigimonModel partner, MobConfigModel targetMob, long partnerExpToReceive)
+        private ReceiveExpResult ReceivePartnerExp(DigimonModel partner, MobConfigModel targetMob, long partnerExpToReceive, decimal fatigueMultiplier = 1m)   // FATIGUE_HOOK
         {
-            var partnerResult = _expManager.ReceiveDigimonExperience(partnerExpToReceive, partner);
+            var partnerResult = _expManager.ReceiveDigimonExperience(partnerExpToReceive, partner, fatigueMultiplier);
 
             _expManager.ReceiveAttributeExperience(partner, targetMob.Attribute, targetMob.Element, targetMob.ExpReward);
 
@@ -859,9 +859,9 @@ namespace DigitalWorldOnline.GameHost
 
             return partnerResult;
         }
-        private ReceiveExpResult ReceivePartnerExp(DigimonModel partner, SummonMobModel targetMob, long partnerExpToReceive)
+        private ReceiveExpResult ReceivePartnerExp(DigimonModel partner, SummonMobModel targetMob, long partnerExpToReceive, decimal fatigueMultiplier = 1m)   // FATIGUE_HOOK
         {
-            var partnerResult = _expManager.ReceiveDigimonExperience(partnerExpToReceive, partner);
+            var partnerResult = _expManager.ReceiveDigimonExperience(partnerExpToReceive, partner, fatigueMultiplier);
 
             _expManager.ReceiveAttributeExperience(partner, targetMob.Attribute, targetMob.Element, targetMob.ExpReward);
 

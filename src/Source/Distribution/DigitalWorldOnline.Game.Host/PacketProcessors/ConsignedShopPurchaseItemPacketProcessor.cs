@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.Separar.Commands.Delete;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
@@ -26,17 +27,20 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         public GameServerPacketEnum Type => GameServerPacketEnum.ConsignedShopPurchaseItem;
 
         private readonly AssetsLoader _assets;
+        private readonly DMBaseBinLoader _dmBase;
         private readonly ILogger _logger;
         private readonly IMapper _mapper;
         private readonly ISender _sender;
 
         public ConsignedShopPurchaseItemPacketProcessor(
             AssetsLoader assets,
+            DMBaseBinLoader dmBase,
             ILogger logger,
             IMapper mapper,
             ISender sender)
         {
             _assets = assets;
+            _dmBase = dmBase;
             _logger = logger;
             _mapper = mapper;
             _sender = sender;
@@ -101,8 +105,16 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 var message = $"You have sold x{boughtAmount} {itemName} in Consigned Store!";
                 sellerClient.Send(new SystemMessagePacket(message));
 
-                _logger.Debug($"Adding {totalValue} bits to {sellerClient.TamerId} consigned warehouse...");
-                sellerClient.Tamer.ConsignedWarehouse.AddBits(totalValue);
+                // Apply ConsignedShop commission from DMBase.bin section 8 (sBASE_INFO.s_fPerson_Charge,
+                // 0.02 = 2% in v487). Buyer paid `totalValue`; seller receives `totalValue - commission`.
+                // Verified against client `PersonStore.cpp:1035`:
+                //   return nNeedMoney - (int)(nNeedMoney * s_fPerson_Charge);
+                long commissionRateBp = (long)Math.Round(_dmBase.Data.PersonStore.PersonCharge * 10000);  // basis points (2% → 200)
+                long commission = totalValue * commissionRateBp / 10000;
+                long sellerPayout = totalValue - commission;
+
+                _logger.Debug($"Adding {sellerPayout} bits to {sellerClient.TamerId} consigned warehouse (gross {totalValue}, commission {commission} = {_dmBase.Data.PersonStore.PersonCharge:P})...");
+                sellerClient.Tamer.ConsignedWarehouse.AddBits(sellerPayout);
 
                 _logger.Debug($"Updating {sellerClient.TamerId} consigned warehouse...");
                 await _sender.Send(new UpdateItemListBitsCommand(sellerClient.Tamer.ConsignedWarehouse));
