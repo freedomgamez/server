@@ -547,6 +547,45 @@ namespace DigitalWorldOnline.Commons.Enums.PacketProcessor
         /// server→client claim result (n1 nResult per nsHotTimeResult).
         /// </summary>
         HotTimeItemRequest = 3135,
+
+        /// <summary>
+        /// pCashShop::BuyRequest (Steam pre-purchase). v487 SendCashShopBuyRequest_Steam
+        /// pushes <c>n1 itemCount, n4 totalPrice, n4 cashType=2, itemCount × n4 productID</c>.
+        /// On non-Steam servers this is a stub that always replies success so the client
+        /// falls into the regular MultiBuy flow.
+        /// </summary>
+        CashShopBuyRequest = 3401,
+
+        /// <summary>
+        /// pCashShop::Gift — single-item gift to peer tamer. C→S:
+        /// <c>n4 price, n4 productIDX, wstring peerTamerName, WORD trailingProtocolDup</c>
+        /// (the trailing WORD is a copy-paste bug in <c>SendGiftCashItem</c> that pushes
+        /// the protocol number into the body; server consumes + ignores).
+        /// </summary>
+        CashShopGiftRequest = 3403,
+
+        /// <summary>
+        /// pCashShop::Balance — duplex. C→S empty; S→C
+        /// <c>n4 result · n4 bonusCash · n4 haveCash</c>. Fired by the cash shop window
+        /// on open and after each successful purchase to refresh the display.
+        /// </summary>
+        CashShopBalanceRequest = 3404,
+
+        /// <summary>
+        /// pCashShop::BuyHistory — duplex. C→S empty; S→C
+        /// <c>n1 result · n2 count · count × n4 productID</c>. Used by the cash shop
+        /// catalog UI to dim already-purchased products.
+        /// </summary>
+        CashShopBuyHistoryRequest = 3412,
+
+        /// <summary>
+        /// pCashShop::MultiBuy — multi-item checkout. C→S
+        /// <c>n1 itemCnt, n4 totalPrice, u8 orderID, itemCnt × n4 productID</c>;
+        /// S→C <c>u2 result, n4 realCash, n4 bonusCash, n1 successCnt + n4×successCnt,
+        /// n1 failedCnt + n4×failedCnt</c>. The single-item Buy (3402) is unused in v487
+        /// — both `SendBuyCashItem` and the dispatch route through MultiBuy.
+        /// </summary>
+        CashShopMultiBuyRequest = 3413,
         /// <summary>
         /// Join event queue. (Custom)
         /// </summary>

@@ -2,6 +2,45 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Phase 4 (start): Cash shop transaction pipeline
+
+End-to-end purchase flow for the v487 cash shop window. The server is now authoritative on the catalog (item IDs, prices, what each product grants) so client-asserted prices are validated rather than trusted. Verified in-game: balance + buy-history populate on cash shop open, MultiBuy purchase debits cash, grants the package items to the cash warehouse, appends product ID to buy history, and the items survive a server restart.
+
+### `CashShopBinLoader` — server-authoritative catalog
+
+`Application.GameAssets/Bins/CashShopBinLoader.cs` parses the v487 `CashShop.bin` (5.16 MB). Two-section layout: nested catalog (TableType → MainCategory → SubCategory → ProductGroup → Product) and a trailing WebData blob. v487's `nlib/base.h` `typedef uint16_t uint64` quirk is documented in the loader so future protocol decoders that hit the same gotcha have a reference. The loader flattens to `Dictionary<uint productId, CashShopProduct>` keyed by `dwProductID`; only the Default table (TableType=0, 4016 products / 805 active) is indexed — Steam table (TableType=1) is parsed-and-discarded since this server stubs Steam pre-purchase. WebData section is read + discarded (UI-only).
+
+### Packet processors (5 new + 1 enriched)
+
+Wire formats verified against `common_vs2019/Protocol/CashShop_Protocol.h` and `cCliGameShop.cpp`:
+
+- **`CashShopBalanceRequestPacketProcessor` (3404)** — empty C→S body; replies `CashShopCoinsPacket(Premium, Silk)`. The same packet type was already pushed unsolicited at login from `ComplementarInformationPacketProcessor`; this handles the client-initiated refresh on cash shop open + post-purchase.
+- **`CashShopBuyHistoryRequestPacketProcessor` (3412)** — empty C→S; replies `CashShopBuyHistoryPacket(productIds)` with format `n1 result · n2 count · count×n4 productID`. Server projects `ItemId` from `client.Tamer.AccountBuyHistory.Items` rows.
+- **`CashShopBuyRequestPacketProcessor` (3401)** — Steam pre-purchase handshake stub. Replies `(error=0, totalCash=Premium+Silk)` so the v487 client (`VERSION_USA`-built) falls into the standard MultiBuy purchase path on non-Steam servers.
+- **`CashShopMultiBuyRequestPacketProcessor` (3413)** — primary purchase path. Wire layout confirmed by hex-dump verification: `n1 itemCnt · n4 totalPrice · u2 ui64OrderID · itemCnt×n4 productID` (11 bytes body for 1 product, NOT the 17 the protocol struct would suggest — see "uint64 typedef quirk" below). Flow: catalog resolution → Active flag check (window dates ignored — v487's bin values are stale 2017-2020) → price validation against `RealPrice` → balance check (combined Premium+Silk) → debit Premium first with Silk spillover → grant `PackageItems[]` to `AccountCashWarehouse` (per-product allPlaced/rollback) → append productIDs to `AccountBuyHistory` → persist. Reply: `u2 result · n4 realCash · n4 bonusCash · n1 successCnt + n4×successCnt · n1 failedCnt + n4×failedCnt`.
+- **`CashShopGiftRequestPacketProcessor` (3403)** — gift to peer tamer. Wire: `n4 price · n4 productIDX · wstring peerTamerName · WORD trailingProtocolDup` (the trailing WORD is a copy-paste bug in the client's `SendGiftCashItem` that pushes the protocol number into the body; server consumes + ignores). Online-peer-only delivery — offline-peer gift routing is deferred. Same validation chain as MultiBuy; sender's debit + peer's warehouse grant. Reply echoes peer name + product ID.
+- **`LoadAccountCashWarehousePacketProcessor` (3930)** — pre-existing handler enriched with the comment `pItem::CashShop` triggered by the cash warehouse refresh path.
+
+### Wire-format gotchas captured
+
+Two v487 quirks worth a permanent comment in the relevant processor headers:
+
+- **`uint64` is 2 bytes on the wire**, not 8. `nlib/base.h:50` aliases `typedef uint16_t uint64;` (vs. `typedef uint64_t u8;` at line 43). Any protocol struct field declared `uint64` resolves to `uint16_t` at `cPacket::push` template instantiation, so `ui64OrderID` etc. emit 2 bytes. Fixed in `CashShopMultiBuyRequestPacketProcessor.Process` (`ReadUShort` not `ReadInt64`); diagnostic trick is to validate `Length` from the packet header against `4 (header) + body + 2 (checksum)` — if body math comes out 6 bytes short of what the struct would imply, suspect a `uint64` typedef hit.
+- **Account-level `Shared_ItemList` rows created via `EnsureAccountItemListAsync` start with `Items=[]`** (the constructor that pads to `Size` with placeholder `ItemModel` rows runs only on the model-side ctor, not on AutoMapper hydrate from DB). For the cash warehouse + buy history, this means a fresh account's in-memory list has zero rows even though the parent `Shared_ItemList` row exists with a valid `Id`. `EnsurePlaceholderSlots` is run before `AddItem` to pad the list to `Size`, and each placeholder gets `ItemListId = list.Id` so the persistence layer's INSERT path (which inserts EVERY row including empty slots, not just populated ones) doesn't FK-violate. Also documented: only `Active` flag gates purchases server-side — the bin's `StartTime`/`EndTime` window fields are stale (e.g. product 31020088 EndTime=2020-11-01) and would reject every purchase if enforced.
+
+### Catalog editor + transaction transparency
+
+Bin-driven so the server admin can disable products by editing the bin's `Active` flag. No DB schema changes — `Account.Premium`/`Account.Silk` already existed, `AccountCashWarehouse` (`ItemListEnum.CashWarehouse=32`) and `AccountBuyHistory` (`ItemListEnum.BuyHistory=33`) already wired through `EnsureAccountItemListAsync`.
+
+### Skipped (intentional)
+
+- `pCashShop::Cart` (3405) / `CartSave` (3406) — explicitly disabled in the v487 client (`assert_csm(false, "장바구니 사용 안됨")`); never sent.
+- `pCashShop::VIPAutoPayment` (3414) — separate VIP-membership subsystem, out of scope.
+
+### Known gap (carry-over for next pass)
+
+`UpdatePremiumAndSilkCommand` and `UpdateItemsCommand(cashWarehouse)` currently run as separate MediatR sends. If the items-persist fails (FK or otherwise) after the cash debit succeeds, cash is debited without items granted — observed during the FK debugging where Premium dropped 5000 → 4860 across two failed attempts before the placeholder/FK fix landed. Wrapping both in a transaction is queued for the next commit.
+
 ## Phase 3 follow-ups: TimeReward in-session timer, gift-box count fix, EF schema hygiene
 
 Bug-fixes uncovered while testing the Phase 3 click-to-claim systems end-to-end against the live client.

@@ -31,7 +31,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         {
             client.Send(new LoadAccountWarehousePacket(client.Tamer.AccountCashWarehouse));
             _logger.Debug($"Sending loadaccountwarehouse packet for character {client.TamerId}...");
-
         }
     }
 }
