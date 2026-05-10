@@ -182,8 +182,16 @@ namespace DigitalWorldOnline.Commons.Models.Base
                 // service layer (CheckEmptyItems), not represented as a half-state row.
                 if (ItemId > 0 && Amount > 0)
                 {
-                    m.Write(BitConverter.GetBytes(ItemId), 0, 4);
-                    m.Write(BitConverter.GetBytes(Amount), 0, 4);
+                    // v487 client recv (cCliGameReceive.cpp:8505 RecvInvenResult,
+                    // and the warehouse + sharestash branches at the same site)
+                    // memcpys each entry into `cItemData`, where ItemId + Amount
+                    // share ONE u4 as a packed bitfield (`m_nType : 17 | m_nCount : 15`).
+                    // Same situation the GiftToArray fix handled. Writing two
+                    // separate u4s leaves m_nCount = 0 → the client's icon renderer
+                    // falls back to "1" / 0-count assert. Pack here.
+                    uint mNAll = ((uint)ItemId & 0x1FFFFu) | (((uint)Amount & 0x7FFFu) << 17);
+                    m.Write(BitConverter.GetBytes(mNAll), 0, 4);
+                    m.Write(BitConverter.GetBytes(0), 0, 4);   // was Amount u4 — now reserved
 
                     if (simplified)
                     {

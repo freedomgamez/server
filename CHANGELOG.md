@@ -2,6 +2,12 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## ItemModelBehavior.ToArray — pack ItemId+Amount into the cItemData bitfield
+
+The v487 client's `RecvInvenResult` (`cCliGameReceive.cpp:8505`) handles inventory + warehouse + sharestash through one path that memcpys each entry as `cItemData` — where `m_nType : 17 | m_nCount : 15` share a single 32-bit field (`m_nAll`). The pre-existing `ItemModelBehavior.ToArray` was writing `ItemId` and `Amount` as TWO separate `u4`s, so the client decoded `m_nType` correctly but `m_nCount` came out as 0 and the icon renderer fell back to "1" everywhere — gift CLAIM into inventory, cash-shop multi-buy quantity, normal shop buys with stack size > 1, etc. The same bug existed (and was already fixed) in `GiftToArray` for the gift-box path; this commit applies the same pack to `ToArray`. Bytes 0-3 now carry `((Amount & 0x7FFF) << 17) | (ItemId & 0x1FFFF)`; bytes 4-7 are zeroed where the old `Amount` u4 used to live; everything past byte 8 is unchanged (accessory / socket / expiry / power / level fields all stay at their previous offsets per the prior "don't reshape the rest of the struct" guidance).
+
+Verified in-game: gift box claim transfers the bin's count correctly to inventory, cash-shop multi-buy with quantity-dropdown delivers the right stack size, existing inventory items already show their real counts on next reload.
+
 ## Phase 4 (start): Cash shop transaction pipeline
 
 End-to-end purchase flow for the v487 cash shop window. The server is now authoritative on the catalog (item IDs, prices, what each product grants) so client-asserted prices are validated rather than trusted. Verified in-game: balance + buy-history populate on cash shop open, MultiBuy purchase debits cash, grants the package items to the cash warehouse, appends product ID to buy history, and the items survive a server restart.
