@@ -7,6 +7,7 @@ using DigitalWorldOnline.Commons.Models.Base;
 using DigitalWorldOnline.Commons.Models.Character;
 using DigitalWorldOnline.Commons.Models.Chat;
 using DigitalWorldOnline.Commons.Models.Digimon;
+using DigitalWorldOnline.Commons.Models;
 using DigitalWorldOnline.Commons.Models.Events;
 using DigitalWorldOnline.Commons.Models.Mechanics;
 
@@ -105,6 +106,14 @@ namespace DigitalWorldOnline.Commons.Interfaces
         Task UpdateCharacterInProgressAsync(InProgressQuestModel progress);
         Task AddCharacterProgressAsync(CharacterProgressModel progress);
         Task UpdateTamerAttendanceRewardAsync(AttendanceRewardModel attendanceRewardModel);
+
+        /// <summary>
+        /// Persists the daily play-time event progress for one character — updates
+        /// <c>Event_TimeReward</c>'s <c>RewardIndex</c> and <c>StartTime</c> when a
+        /// threshold fires. Called from <c>DailyEventService.TickAsync</c>.
+        /// </summary>
+        Task UpdateTamerTimeRewardAsync(TimeReward timeReward);
+
         Task UpdateCharacterArenaDailyPointsAsync(CharacterArenaDailyPointsModel points);
     }
 }

@@ -175,7 +175,12 @@ namespace DigitalWorldOnline.Commons.Models.Base
             byte[] buffer = Array.Empty<byte>();
             using (MemoryStream m = new())
             {
-                if (ItemId > 0)
+                // ItemId > 0 && Amount > 0 — half-state rows (ItemId set, Amount cleared)
+                // serialize as empty slot per the else branch. The client's cIcon::RenderCount
+                // (Icon.cpp:235) asserts when nCount == 0; emitting them as empty avoids the
+                // popup. Real items with zero stock should be removed from the list at the
+                // service layer (CheckEmptyItems), not represented as a half-state row.
+                if (ItemId > 0 && Amount > 0)
                 {
                     m.Write(BitConverter.GetBytes(ItemId), 0, 4);
                     m.Write(BitConverter.GetBytes(Amount), 0, 4);
@@ -249,9 +254,12 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <returns>The serialization byte array.</returns>
         public byte[] GiftToArray(bool simplified = false)
         {
-            if (ItemId <= 0)
+            // ItemId <= 0 OR Amount <= 0 — half-state row, skip per the cIcon::RenderCount
+            // (Icon.cpp:235 nCount != 0) assert. Belt-and-braces with the upstream filter
+            // in ItemListModelBehavior.GiftToArray (also filters by Amount > 0).
+            if (ItemId <= 0 || Amount <= 0)
             {
-                return Array.Empty<byte>(); // Retorna um array vazio se o ItemId for menor ou igual a 0.
+                return Array.Empty<byte>();
             }
 
             using (MemoryStream m = new())

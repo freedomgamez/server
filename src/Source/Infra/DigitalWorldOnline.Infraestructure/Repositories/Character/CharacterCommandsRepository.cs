@@ -1163,6 +1163,21 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Character
             return;
         }
 
+        public async Task UpdateTamerTimeRewardAsync(TimeReward timeReward)
+        {
+            var dto = await _context.TimeReward
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CharacterId == timeReward.CharacterId);
+
+            if (dto == null) return;
+
+            dto.RewardIndex = timeReward.RewardIndex;
+            dto.StartTime = timeReward.StartTime;
+
+            _context.TimeReward.Update(dto);
+            await _context.SaveChangesAsync();
+        }
+
         public async Task UpdateCharacterArenaDailyPointsAsync(CharacterArenaDailyPointsModel points)
         {
             var dto = await _context.CharacterDailyPoints

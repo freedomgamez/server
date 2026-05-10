@@ -2,6 +2,52 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Phase 3 features: Hot Time, Daily Play-Time, Attendance click-to-claim
+
+The bin loaders from the prior partial-Phase-3 commit unblocked the actual feature work driven by `Event.bin` §1, §2, and §5. All three click-to-claim or auto-grant systems landed in this commit, all wired to deliver into the player's gift box (`GiftWarehouse` — the v487 client's "event mail" surface) where appropriate. Verified end-to-end in-game.
+
+### C9 — Hot Time (`pEvent::HotTimeEvent` 3134, `pEvent::HotTimeItemRequest` 3135)
+
+Click-to-claim daily reward during a campaign + intra-day time-of-day window. Server picks today's entry (matching `DayOfWeek`) from `Event.bin` §5, sends `HotTimeEventInfoPacket` at login describing `(state, currentEventNo, nextEventNo, alreadyClaimed, startTimeLeftSec, endTimeLeftSec)`, and processes `HotTimeItemRequest` (handled by `HotTimeItemRequestPacketProcessor`) — validates the bin's window + intra-day gate + already-claimed-today, grants the bin's `(ItemId × Count)` to the cash warehouse, replies with the matching `nsHotTimeResult` code (0=success, 30597=already-claimed, 30598=not-time). v487 client at `EventContents.cpp:686` passes the int code straight to `cPrintMsg::PrintMsg` for the toast. Wire format verified against `GS2C_NTF_HOTTIME_EVENT_INFO` and `GS2C_RECV_HOTTIME_GET_RESULT` in `common_vs2019/Protocol/Event_Protocol.h`. Per-character claim ledger is in-memory only (`ConcurrentDictionary<(charId, eventNo), DateOnly>`) — survives map enters / channel switches but not server restart. Same posture as the tradeoff captured in `HotTimeService.cs`'s class header; persistence is queued to ride along with future per-character event-state schema work.
+
+### C7 — Daily Play-Time (`pEvent::DailyEventInfo` 3106)
+
+Server-driven auto-grant tier system: play 30/30/60/60 min today → four reward stacks delivered to `GiftWarehouse`. The dormant `TimeReward` scaffolding (`Event_TimeReward` table, EF mapping, `CharacterModelBehavior.UpdateTimeReward()`, `TimeRewardPacket`) was wired up — most of the infrastructure already existed in DSO but was never invoked. Specific fixes:
+
+- `TimeRewardPacket.cs` wire format had three pre-existing bugs masking the panel display: was sending raw `RewardIndex (0..3)` as `nEventNo` so the client's `GetMap(ET_DAILY, 0)` lookup never resolved; was duplicating `RemainingTime` in place of `nTotalTime`; was hardcoding `nWeek = 1`. Fixed to send `(0..3 offset, max(0, RemainingTime), CurrentTotalSeconds, today's DayOfWeek)`. The offset detail matters: the client at `Event.cpp:981-984` keys `m_mapEvent` by `nType + nNO` with `ET_DAILY = 10000` as the type, so the server must send the offset within the daily-event group, NOT the full `TableNo`.
+- `TimeReward` constructor was setting `StartTime = DateTime.Now`, making `RemainingTime ≈ 0` immediately at character creation (the panel would have shown "expired" forever). Now sets `StartTime = Now + First-tier duration` (30 min).
+- Added `CurrentEventNo` and `CurrentTotalSeconds` getters on the model so `TimeRewardPacket` reads from one source of truth.
+- New `DailyEventService` exposes `FindByOffset(0..N-1)` against `EventTableBinLoader.Data.Daily` (records sorted by `TableNo`) and `TickAsync(client)` for the per-tick advance check. Hooked into both `MapServerTamerOperation` and `DungeonsServerTamerOperation` per-tamer loops next to `CheckMonthlyReward`. When the threshold is reached: grants the bin's `EventDailyRecord.Rewards[]` to `GiftWarehouse` (event mail), advances the index, persists via the new `UpdateTamerTimeRewardCommand`, and re-broadcasts the panel.
+- Login push uncommented at `ComplementarInformationPacketProcessor.cs:113-114` (was pre-existing TODO).
+
+Verified in-game: server logs `DailyEvent 10001 fired for tamer 101298 → delivered 3 reward stack(s) to GiftWarehouse` on the first tick, items appear in the gift box.
+
+### C6 — Attendance click-to-claim (`pEvent::Attendance` 3107)
+
+Player clicks the in-world attendance button (`BGSprite.cpp:691-696`); server processes the request, advances `AttendanceReward.TotalDays`, looks up the bin's monthly reward for that day, delivers to `GiftWarehouse`, and replies with the `n4 nResCode + u4 nGiveItemNo + n4 nWorkDayHistory` payload the client unpacks at `cCliGameEvent.cpp:18-65`.
+
+- New `AttendanceService` — singleton, holds the active-window dates from `appsettings:Attendance:Start`/`:End`. v487's bin window is stale 2017-03-15..2017-04-26 so config-driven is the right knob; `Attendance:Start`/`End` in `appsettings.Development.Example.json` left empty default to "always-open" for dev. The bin's value is loaded for visibility but not enforced server-side.
+- New `AttendanceRequestPacketProcessor` — handles incoming 3107. Validates window + LastRewardDate-already-today, increments `TotalDays`, picks the day's reward via the bin-backed `MonthlyEventAssetsQuery`, grants to `GiftWarehouse`, persists.
+- New `AttendanceResponsePacket` — error reply (just `nResCode`) and success reply (with `nGiveItemNo + nWorkDayHistory`). `nWorkDayHistory` derived as `(1 << TotalDays) - 1` for consecutive streaks; non-consecutive day tracking deferred until a real bitmap column is added.
+
+Note: the v487 client gates `Send_Attendance` on `g_pDataMng->GetAttendance()->IsEnableAttendance()`, which reads the bin's `EventTable.Attendance` window — so the click button is grey until the bin's window covers today. End-to-end click flow verification will wait until a bin tool exists; server-side the wire format and validation paths are complete.
+
+### Item-list zero-count serialization filter (defense-in-depth)
+
+The v487 client's `cIcon::RenderCount` (`Icon.cpp:235`) asserts on `nCount != 0` when rendering item icons. Half-state rows in any `ItemListModel` (`ItemId > 0` but `Amount == 0` — typically from an incomplete grant flow or a manual DB row) would slip through to the wire and pop up `CsAssert` mid-render. Hardened the serialization layer:
+
+- `ItemListModelBehavior.Count` — was `Items.Count(x => x.ItemId != 0)`; now also requires `Amount > 0`.
+- `ItemListModelBehavior.GiftToArray` — same predicate tightening on the per-item filter.
+- `ItemModelBehavior.ToArray(simplified)` — `if (ItemId > 0)` → `if (ItemId > 0 && Amount > 0)`. Half-state rows fall to the else-branch and serialize as the canonical empty-slot byte block.
+- `ItemModelBehavior.GiftToArray` — added `Amount <= 0` early-return.
+
+Belt-and-braces; the right long-term fix is preventing zero-amount rows from being persisted in the first place, but the serialization filter ensures no client-side render asserts even if the storage layer drops one.
+
+### Phase 3 deferrals (intentional, not lost)
+
+- **C8 friend recommend (sRECOMMENDE)** — v487 client has no `Send-Recommend` path (`RecommendEvent_Contents.cpp` only RECEIVES, never INITIATES). Server can parse the bin section but cannot trigger; deferred to Phase 8.
+- **C10 daily-check streak (sDAILY_CHECK_EVENT)** — gated by `LJW_DAILYCHECKEVENT_191030` (which depends on `SERVER_KSW_DAILYCHECKEVENT_191014`) and `COMMON_LIB_FIXED`. Neither macro is defined anywhere in v487. The 100-day calendar bin data is still loaded for parity, but `EventContents::MakeWorldData` never sends the request packet, the client's UI never opens. Server has no work to do for v487; deferred.
+
 ## Phase 3 (partial): Buff.bin + Achieve.bin + Event.bin migration
 
 Three more static-data bins ported from MariaDB to in-memory Pack03 bin loaders, mirroring the Phase 2 DMBase/Digimon_List/DigimonEvo work. Continues the static-data-off-DB plan documented in memory `project_bin_static_data.md`. Loader patterns mirror `DMBaseBinLoader` exactly: POCO + `*BinLoader.cs` under `Application.GameAssets/Bins/`, DI-singleton in `Game.Host/Program.cs`, eager-loaded at boot with a count-line in the startup log.

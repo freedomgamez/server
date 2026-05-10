@@ -12,7 +12,12 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <summary>
         /// Returns the current itens in inventory.
         /// </summary>
-        public byte Count => (byte)Items.Count(x => x.ItemId != 0);
+        // Filter by Amount > 0 too so half-empty rows (ItemId set, Amount cleared by a
+        // partial grant or manual DB row) don't appear in the wire count. The v487 client
+        // renders one icon per "Count" entry and asserts at cIcon::RenderCount (Icon.cpp:235)
+        // when nCount == 0 — popping a CsAssert dialog mid-render. Belt-and-braces with the
+        // serialization-side filter in GiftToArray / ToArray.
+        public byte Count => (byte)Items.Count(x => x.ItemId != 0 && x.Amount > 0);
 
         /// <summary>
         /// Return the current free slots amount.
@@ -702,7 +707,11 @@ namespace DigitalWorldOnline.Commons.Models.Base
 
             using (MemoryStream m = new())
             {
-                var filteredItems = Items.Where(x => x.ItemId > 0).OrderBy(x => x.Slot);
+                // Filter by Amount > 0 too — a row with ItemId>0 but Amount==0 represents
+                // a partially-cleared/orphaned slot (typically from an incomplete grant or
+                // a stash item that got consumed but never had its row purged). Sending it
+                // makes the client's cIcon::RenderCount(Icon.cpp:235) assert.
+                var filteredItems = Items.Where(x => x.ItemId > 0 && x.Amount > 0).OrderBy(x => x.Slot);
 
                 if (filteredItems.Any())
                 {

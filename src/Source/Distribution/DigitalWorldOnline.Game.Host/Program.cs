@@ -84,6 +84,9 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<PartyManager>();
                     services.AddSingleton<FatigueService>();   // FATIGUE_HOOK
                     services.AddSingleton<GuildLevelService>();
+                    services.AddSingleton<HotTimeService>();
+                    services.AddSingleton<DailyEventService>();
+                    services.AddSingleton<AttendanceService>();
 
                     services.AddSingleton<EventQueueManager>();
                     

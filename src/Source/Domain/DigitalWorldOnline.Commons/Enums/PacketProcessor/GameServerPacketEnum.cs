@@ -527,6 +527,26 @@ namespace DigitalWorldOnline.Commons.Enums.PacketProcessor
         /// sends the Gift Storage Item Retrieve.
         /// </summary>
         GiftStorageItemRetrieve = 3936,
+
+        /// <summary>
+        /// pEvent::Attendance — duplex packet: client→server "claim attendance" request
+        /// (no payload), server→client claim result with <c>n4 nResCode</c> and optional
+        /// <c>u4 nGiveItemNo + n4 nWorkDayHistory</c> on success. Triggered by the player
+        /// clicking the attendance button at <c>BGSprite.cpp:696</c>.
+        /// </summary>
+        AttendanceRequest = 3107,
+
+        /// <summary>
+        /// pEvent::HotTimeEvent — server→client panel push: state, current/next table indices,
+        /// already-claimed flag, time-left to next state edge. Driven by Event.bin §5 records.
+        /// </summary>
+        HotTimeEventInfo = 3134,
+
+        /// <summary>
+        /// pEvent::HotTimeItemRequest — duplex packet: client→server "claim" request,
+        /// server→client claim result (n1 nResult per nsHotTimeResult).
+        /// </summary>
+        HotTimeItemRequest = 3135,
         /// <summary>
         /// Join event queue. (Custom)
         /// </summary>

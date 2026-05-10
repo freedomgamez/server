@@ -48,7 +48,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             AssetsLoader assets,
             ILogger logger,
             ISender sender,
-            IMapper mapper)
+            IMapper mapper,
+            HotTimeService hotTime)
         {
             _partyManager = partyManager;
             _mapServer = mapServer;
@@ -57,7 +58,10 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _logger = logger;
             _sender = sender;
             _mapper = mapper;
+            _hotTime = hotTime;
         }
+
+        private readonly HotTimeService _hotTime;
 
         public async Task Process(GameClient client, byte[] packetData)
         {
@@ -106,8 +110,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _logger.Debug($"Sending account cash coins packet for character {client.TamerId}...");
             client.Send(new CashShopCoinsPacket(client.Premium, client.Silk));
 
-            //TODO: DebugLog($"Sending time reward packet for character {client.TamerId}...");
-            //client.Send(new TimeRewardPacket(client.Tamer.TimeReward));
+            // Daily play-time event panel — pEvent::DailyEventInfo (3106). Backed by Event.bin
+            // §2 + the per-character Event_TimeReward row. Wire format previously broken
+            // (raw RewardIndex sent as nEventNo; client's GetMap(ET_DAILY, 0) lookup never
+            // resolved a record). Fixed in C7: TimeRewardPacket reads CurrentEventNo (10000+).
+            _logger.Debug($"Sending daily event panel for character {client.TamerId}...");
+            client.Send(new TimeRewardPacket(client.Tamer.TimeReward));
 
             if (client.ReceiveWelcome)
             {
@@ -132,6 +140,18 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         
             _logger.Debug($"Sending attendance event packet for character {client.TamerId}...");
             client.Send(new TamerAttendancePacket(client.Tamer.AttendanceReward));
+
+            _logger.Debug($"Sending hot-time event panel for character {client.TamerId}...");
+            var hotTimeNow = DateTime.UtcNow;
+            var hotTimeSnapshot = _hotTime.GetSnapshot(hotTimeNow);
+            client.Send(new HotTimeEventInfoPacket(
+                (byte)hotTimeSnapshot.CurrentState,
+                (byte)(hotTimeSnapshot.Current?.EventNo ?? 0),
+                (byte)(hotTimeSnapshot.Next?.EventNo ?? 0),
+                hotTimeSnapshot.Current != null
+                    && _hotTime.HasClaimed(client.TamerId, hotTimeSnapshot.Current.EventNo, hotTimeNow),
+                hotTimeSnapshot.StartTimeLeftSec,
+                hotTimeSnapshot.EndTimeLeftSec));
 
             _logger.Debug($"Sending update status packet for character {client.TamerId}...");
             client.Send(new UpdateStatusPacket(client.Tamer));

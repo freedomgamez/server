@@ -51,6 +51,12 @@ namespace DigitalWorldOnline.GameHost
 
                 CheckMonthlyReward(client);
 
+                // C7: Daily play-time event tick — checks TimeReward.StartTime against now;
+                // if elapsed, delivers Event.bin §2 reward to GiftWarehouse, advances index,
+                // persists, and broadcasts updated panel. Cheap enough to run per tick:
+                // early-exits when index is Ended or threshold not yet elapsed.
+                _ = _dailyEvent.TickAsync(client);
+
                 tamer.AutoRegen();
                 tamer.ActiveEvolutionReduction();
 

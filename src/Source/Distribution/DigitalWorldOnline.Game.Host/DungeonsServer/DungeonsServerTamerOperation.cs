@@ -50,6 +50,9 @@ namespace DigitalWorldOnline.GameHost
 
                 CheckMonthlyReward(client);
 
+                // C7: Daily play-time event tick — see MapServerTamerOperation for details.
+                _ = _dailyEvent.TickAsync(client);
+
                 tamer.AutoRegen();
                 tamer.ActiveEvolutionReduction();
 

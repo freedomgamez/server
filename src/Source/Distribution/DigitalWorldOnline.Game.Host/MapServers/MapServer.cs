@@ -15,6 +15,7 @@ namespace DigitalWorldOnline.GameHost
         private readonly ExpManager _expManager;
         private readonly DropManager _dropManager;
         private readonly FatigueService _fatigueService;   // FATIGUE_HOOK
+        private readonly DailyEventService _dailyEvent;    // C7
         private readonly AssetsLoader _assets;
         private readonly ConfigsLoader _configs;
         private readonly ILogger _logger;
@@ -31,6 +32,7 @@ namespace DigitalWorldOnline.GameHost
             ExpManager expManager,
             DropManager dropManager,
             FatigueService fatigueService,   // FATIGUE_HOOK
+            DailyEventService dailyEvent,    // C7
             ILogger logger,
             ISender sender,
             IMapper mapper)
@@ -40,6 +42,7 @@ namespace DigitalWorldOnline.GameHost
             _expManager = expManager;
             _dropManager = dropManager;
             _fatigueService = fatigueService;   // FATIGUE_HOOK
+            _dailyEvent = dailyEvent;          // C7
             _assets = assets.Load();
             _configs = configs.Load();
             _logger = logger;
