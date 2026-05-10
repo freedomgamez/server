@@ -88,10 +88,13 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     item.SetItemInfo(info);
                     item.ItemId = rewardInfo.ItemId;
                     item.Amount = rewardInfo.ItemCount;
+                    // Gift-box claim window — see DailyEventService for the full rationale.
+                    // 14 days from grant; ItemModelBehavior.GiftToArray reads EndDate directly.
+                    item.EndDate = DateTime.UtcNow.AddDays(14);
                     if (item.IsTemporary)
                         item.SetRemainingTime((uint)item.ItemInfo.UsageTimeMinutes);
 
-                    if (client.Tamer.GiftWarehouse.AddItem(item))
+                    if (client.Tamer.GiftWarehouse.AddGiftItem(item))
                     {
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.GiftWarehouse));
                         // Bin index is 0-based on the wire; TotalDays just incremented to N

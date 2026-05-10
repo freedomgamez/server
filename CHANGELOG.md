@@ -2,6 +2,32 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Phase 3 follow-ups: TimeReward in-session timer, gift-box count fix, EF schema hygiene
+
+Bug-fixes uncovered while testing the Phase 3 click-to-claim systems end-to-end against the live client.
+
+### TimeReward timer no longer counts down while offline
+
+The original DSO scaffolding stored only an absolute `StartTime` and computed remaining time as `StartTime - Now`, so the wall clock kept ticking the player toward their next reward while logged out. Replaced with an online-only model:
+
+- New `TimeReward.RemainingSeconds` (DB column added in migration `20260510012518_AddTimeRewardRemainingSeconds`, default 1800 = First-tier 30 min) plus an in-memory `LastTickTime` (transient, `[NotMapped]`).
+- New `TimeReward.Tick(now)` decrements `RemainingSeconds` by `(now - LastTickTime)` only when the player is in-session. First tick after model load (when `LastTickTime == DateTime.MinValue`) just seeds the timestamp without subtracting — that's how the timer pauses across the offline gap.
+- `DailyEventService.TickAsync` now drives off `reward.Tick(now)` instead of comparing against absolute `StartTime`. `UpdateRewardIndex` resets `RemainingSeconds` to the next tier's duration on advance.
+- `GameServer.cs` disconnect handler persists `RemainingSeconds` via `UpdateTamerTimeRewardCommand` so sub-threshold session progress survives logout. (Hard-crash mid-session still loses progress between last advance and crash; periodic save deferred until it becomes an issue at scale.)
+- Legacy `StartTime` column kept for AutoMapper / DB schema survival; no longer drives any logic.
+
+### Gift box count display: `cItemData` bitfield packing
+
+The v487 client's gift-box recv (`cCliGameShop::RecvGiftShop`) memcpys a `cItemData` array directly off the wire (`common_vs2019/cItemData.h`). `cItemData` packs item type and count into a SINGLE 32-bit bitfield: `u4 m_nType : 17; u4 m_nCount : 15` (sharing the `m_nAll` union under MSVC `pragma pack(4)`). The pre-existing `ItemModelBehavior.GiftToArray` was writing ItemId and Amount as TWO separate `u4`s (8 bytes), so the client decoded `m_nType` correctly but `m_nCount` came out as 0 — daily-event and attendance gifts displayed as "1" (the icon renderer's 0/1 fallback). Fix: pack `((Amount & 0x7FFF) << 17) | (ItemId & 0x1FFFF)` into bytes 0-3 and zero bytes 4-7 where Amount used to live. Layout past byte 8 unchanged from the legacy DSO format — accessory/socket/expiry/rate/level fields are byte-for-byte identical to before.
+
+### Other gift-box fixes
+- New `ItemListModelBehavior.AddGiftItem` helper that wraps `AddItemWithSlot` so a gift item lands in a single empty slot at its full bin count, instead of being routed through `AddItem`'s overlap-split path that would fragment a 10× stack into ten 1× slots.
+- `ItemModelBehavior.GiftToArray` derives the gift-box "remaining minutes" directly from `EndDate` instead of `RemainingMinutes()`. The latter gates by `ItemInfo.TemporaryItem` and returned 0 for non-temp items, making every gift display "expires now". `EndDate = Now + 14 days` at grant time gives the standard 14-day claim window; an `EndDate` set but in the past serializes to the legacy `0xFFFFFFFF` "expired" sentinel.
+
+### EF schema hygiene: `Asset_EvolutionLine` keeps no bin-derived columns
+
+`EvolutionLineAssetConfiguration` now `Ignore`s `SkillMaxLevels`. The field is bin-driven runtime data populated by `DigimonEvolutionAssetsQueryHandler` from `DMBase.bin §12`; it belongs to the in-memory DTO/Model only. `Asset_EvolutionLine` is DB-resident static data already staged for retirement once the `DigimonEvo.bin` migration completes, so adding a new column to it would defeat the static-data-off-MariaDB plan. The `EF.Ignore` drops it from the schema mapping; the property remains usable on the DTO surface that bin handlers populate.
+
 ## Phase 3 features: Hot Time, Daily Play-Time, Attendance click-to-claim
 
 The bin loaders from the prior partial-Phase-3 commit unblocked the actual feature work driven by `Event.bin` §1, §2, and §5. All three click-to-claim or auto-grant systems landed in this commit, all wired to deliver into the player's gift box (`GiftWarehouse` — the v487 client's "event mail" surface) where appropriate. Verified end-to-end in-game.

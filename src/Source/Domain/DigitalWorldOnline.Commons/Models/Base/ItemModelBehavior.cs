@@ -262,10 +262,19 @@ namespace DigitalWorldOnline.Commons.Models.Base
                 return Array.Empty<byte>();
             }
 
+            // v487 client packs ItemId + Count into ONE u4 bitfield (cItemData::m_nAll
+            // — type:17, count:15, common_vs2019/cItemData.h). Writing them as two
+            // separate u4s left m_nCount=0, which is why DailyEvent/Attendance gifts
+            // displayed "1" (the icon renderer's 0/1 fallback). Everything *past* the
+            // first 8 bytes is unchanged from the legacy layout — the in-game gift
+            // expiry, accessory and socket fields were already at their previous
+            // offsets and shouldn't be reshuffled in this fix.
+            uint mNAll = ((uint)ItemId & 0x1FFFFu) | (((uint)Amount & 0x7FFFu) << 17);
+
             using (MemoryStream m = new())
             {
-                m.Write(BitConverter.GetBytes(ItemId), 0, 4);
-                m.Write(BitConverter.GetBytes(Amount), 0, 4);
+                m.Write(BitConverter.GetBytes(mNAll), 0, 4);    // packed type|count
+                m.Write(BitConverter.GetBytes(0), 0, 4);        // was Amount u4 — now reserved
 
                 if (simplified)
                 {
@@ -299,14 +308,24 @@ namespace DigitalWorldOnline.Commons.Models.Base
                     }
 
                     m.Write(BitConverter.GetBytes(0), 0, 2);
-                    if (RemainingMinutes() == 4294967280)
+
+                    // Gift box expiration: derive directly from EndDate so non-temporary
+                    // items (most gifts — XP boosts and time-limited items are the
+                    // exception) still expose a "claim by" countdown. RemainingMinutes()
+                    // gates by ItemInfo.TemporaryItem and would return 0 for everything
+                    // else, making the gift UI show "expires now" on every item.
+                    uint giftRemainingMin = 0;
+                    if (EndDate > DateTime.UtcNow)
                     {
-                        m.Write(BitConverter.GetBytes(RemainingMinutes()), 0, 4);
+                        giftRemainingMin = (uint)Math.Min(uint.MaxValue, (EndDate - DateTime.UtcNow).TotalMinutes);
                     }
-                    else
+                    else if (EndDate != default)
                     {
-                        m.Write(BitConverter.GetBytes(UtilitiesFunctions.RemainingTimeMinutes((int)RemainingMinutes())), 0, 4);
+                        // EndDate set but in the past → expired sentinel that the client
+                        // recognizes (matches the legacy 0xFFFFFFFF-1 behavior).
+                        giftRemainingMin = 0xFFFFFFFF;
                     }
+                    m.Write(BitConverter.GetBytes(giftRemainingMin), 0, 4);
                     m.Write(BitConverter.GetBytes(0), 0, 4);
                 }
 

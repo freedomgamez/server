@@ -347,6 +347,26 @@ namespace DigitalWorldOnline.Commons.Models.Base
             return true;
         }
 
+        /// <summary>
+        /// Drops a single gift entry into the next empty slot, preserving the input
+        /// <paramref name="newItem"/>'s full <c>Amount</c> in one slot regardless of the
+        /// item's stack <c>Overlap</c>. Gift box semantics: each gift is one slot showing
+        /// "ItemId × N" until the player claims it; only at claim-time do inventory stack
+        /// rules apply. Using <see cref="AddItem"/> here would split a "9202 × 2" gift into
+        /// two slots of 1 if the item's normal Overlap is 1.
+        /// <para>
+        /// Returns false if the gift box is full (no empty slot) or if the input is
+        /// half-state (<c>ItemId == 0</c> or <c>Amount == 0</c>).
+        /// </para>
+        /// </summary>
+        public bool AddGiftItem(ItemModel newItem)
+        {
+            if (newItem.Amount == 0 || newItem.ItemId == 0) return false;
+            var emptySlotIdx = GetEmptySlot;
+            if (emptySlotIdx < 0) return false;
+            return AddItemWithSlot(newItem, emptySlotIdx);
+        }
+
         public bool AddItemWithSlot(ItemModel itemToAdd, int slot)
         {
             if (itemToAdd.Amount == 0 || itemToAdd.ItemId == 0)

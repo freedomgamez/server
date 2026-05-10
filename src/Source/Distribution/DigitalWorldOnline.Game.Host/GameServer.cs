@@ -125,6 +125,17 @@ namespace DigitalWorldOnline.Game
                 _logger.Information($"Updating character {gameClientEvent.Client.TamerId} state upon disconnect...");
                 _sender.Send(new UpdateCharacterStateCommand(gameClientEvent.Client.TamerId, CharacterStateEnum.Disconnected));
 
+                // Persist daily play-time progress so RemainingSeconds reflects what was
+                // actually accumulated this session. Without this, sub-threshold play
+                // (under 30 min for the First tier) was lost across logouts — DB only
+                // got updated on advance, never on disconnect.
+                if (gameClientEvent.Client.Tamer.TimeReward != null
+                    && gameClientEvent.Client.Tamer.TimeReward.RewardIndex != Commons.Enums.TimeRewardIndexEnum.Ended)
+                {
+                    gameClientEvent.Client.Tamer.TimeReward.Tick(DateTime.UtcNow); // final decrement
+                    _sender.Send(new UpdateTamerTimeRewardCommand(gameClientEvent.Client.Tamer.TimeReward));
+                }
+
                 CharacterFriendsNotification(gameClientEvent);
                 CharacterGuildNotification(gameClientEvent);
                 PartyNotification(gameClientEvent);

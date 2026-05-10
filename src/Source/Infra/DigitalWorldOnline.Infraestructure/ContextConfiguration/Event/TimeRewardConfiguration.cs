@@ -28,6 +28,16 @@ namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Event
                 .HasColumnType("datetime(6)")
                 .HasDefaultValueSql("CURRENT_TIMESTAMP(6)")
                 .IsRequired();
+
+            // RemainingSeconds: in-session-decremented countdown to the current threshold.
+            // Default 1800 = 30 min (matches First-tier duration); existing rows from prior
+            // builds get reset to First-tier on migration. Frozen across logouts so offline
+            // time doesn't burn the timer.
+            builder
+                .Property(x => x.RemainingSeconds)
+                .HasColumnType("int")
+                .HasDefaultValue(1800)
+                .IsRequired();
         }
     }
 }

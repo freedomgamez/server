@@ -1172,7 +1172,8 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Character
             if (dto == null) return;
 
             dto.RewardIndex = timeReward.RewardIndex;
-            dto.StartTime = timeReward.StartTime;
+            dto.RemainingSeconds = timeReward.RemainingSeconds;
+            dto.StartTime = timeReward.StartTime;  // legacy column; updated for parity, not consumed
 
             _context.TimeReward.Update(dto);
             await _context.SaveChangesAsync();

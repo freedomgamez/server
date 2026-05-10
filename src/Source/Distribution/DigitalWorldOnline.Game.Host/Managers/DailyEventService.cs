@@ -72,13 +72,16 @@ namespace DigitalWorldOnline.Game.Managers
             if (client.Tamer?.TimeReward == null) return;
             var reward = client.Tamer.TimeReward;
             if (reward.RewardIndex == TimeRewardIndexEnum.Ended) return;
-            if (DateTime.Now < reward.StartTime) return; // threshold not yet elapsed
+            // Tick decrements RemainingSeconds by elapsed in-session time. Returns true
+            // when the threshold has fired this tick. First tick after model load just
+            // seeds LastTickTime — that's how the timer pauses while the player is offline
+            // (offline gap is not subtracted).
+            var now = DateTime.UtcNow;
+            if (!reward.Tick(now)) return;
 
             // Threshold fired — capture current event before we advance.
             var current = FindByOffset(reward.CurrentEventNo);
 
-            // Bypass CharacterModelBehavior.UpdateTimeReward() — it has a 30 s debounce that
-            // doesn't match our threshold-elapsed semantics. Call the real advance directly.
             reward.UpdateRewardIndex();
 
             if (current != null)
@@ -99,10 +102,14 @@ namespace DigitalWorldOnline.Game.Managers
                     item.SetItemInfo(info);
                     item.ItemId = rwd.ItemId;
                     item.Amount = rwd.Count;
+                    // Gift-box claim window — separate from in-game item duration; default
+                    // 14 days from grant. Picked up by ItemModelBehavior.GiftToArray which
+                    // derives the wire's "remaining minutes" directly from EndDate.
+                    item.EndDate = DateTime.UtcNow.AddDays(14);
                     if (item.IsTemporary)
                         item.SetRemainingTime((uint)item.ItemInfo.UsageTimeMinutes);
 
-                    if (client.Tamer.GiftWarehouse.AddItem(item))
+                    if (client.Tamer.GiftWarehouse.AddGiftItem(item))
                         delivered++;
                     else
                         _logger.Warning(

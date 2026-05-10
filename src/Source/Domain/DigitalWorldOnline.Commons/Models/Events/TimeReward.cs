@@ -15,9 +15,29 @@ namespace DigitalWorldOnline.Commons.Models
         public long CharacterId { get; private set; }
 
         /// <summary>
-        /// The current index start time.
+        /// The current index start time. Legacy field — was used as the absolute UTC
+        /// timestamp the threshold would fire. Replaced by <see cref="RemainingSeconds"/>
+        /// because absolute time kept counting down even while the player was offline.
+        /// Kept for backward compat / DB column survival; no longer drives any logic.
         /// </summary>
         public DateTime StartTime { get; private set; }
+
+        /// <summary>
+        /// Seconds remaining until the current threshold fires. Decremented in-memory
+        /// each in-session tick (see <see cref="Tick"/>); persisted on advance. The
+        /// pause-while-offline behavior comes from <see cref="LastTickTime"/> being
+        /// reset to <c>Now</c> on the first tick of a new session — offline gap is
+        /// not subtracted.
+        /// </summary>
+        public int RemainingSeconds { get; private set; }
+
+        /// <summary>
+        /// In-memory only — the timestamp of the last in-session tick that decremented
+        /// <see cref="RemainingSeconds"/>. Defaults to <see cref="DateTime.MinValue"/>
+        /// after model load; first <see cref="Tick"/> seeds it to <c>Now</c> without
+        /// decrementing, so offline time doesn't roll the timer forward.
+        /// </summary>
+        public DateTime LastTickTime { get; set; } = DateTime.MinValue;
 
         /// <summary>
         /// The reward current index and duration.
@@ -27,10 +47,9 @@ namespace DigitalWorldOnline.Commons.Models
         public TimeReward()
         {
             RewardIndex = TimeRewardIndexEnum.First;
-            // StartTime is the absolute timestamp when this index's threshold elapses.
-            // Pre-existing bug: was set to Now (RemainingTime would be ~0 immediately).
-            // Fix: add the First-tier duration so the threshold fires after 30 min of play.
-            StartTime = DateTime.Now.AddSeconds(TimeRewardDurationEnum.First.GetHashCode());
+            RemainingSeconds = (int)TimeRewardDurationEnum.First;    // 1800 s = 30 min
+            // StartTime kept for AutoMapper / DB schema; not used for fire-time logic.
+            StartTime = DateTime.Now.AddSeconds((int)TimeRewardDurationEnum.First);
         }
 
         /// <summary>
