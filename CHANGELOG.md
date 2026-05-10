@@ -2,6 +2,46 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Skill.bin migration — full skill data off DB into in-memory bin
+
+Static skill data — the catalog of every digimon/tamer/monster/item skill plus per-digimon skill loadouts — moves from MariaDB to v487's `Skill.bin` and `Digimon_List.bin`. Five DB-backed queries retired, one new bin loader, plus two pre-existing bugs in the partner-skill cast path that the migration surfaced and fixed.
+
+### `SkillBinLoader` + `Skill` POCO (new)
+
+Parses `Skill.bin` per `SkillMng::SaveBin` (`LibProj/CsFileTable/SkillMng.cpp:536-587`). Three sections, file-size verified at parse time (3,925,260 B):
+
+- **§1 CsSkill (5322 × 736 B)** — universal skill table: id, three `sAPPLY` slots, level/use/target/range/timing/cooldown/skill-type/icon/req-item — every server-consumed field plumbed through. String fields (`s_szName`, `s_szComment`) intentionally skipped per the no-strings convention.
+- **§2 CsTamerSkill (64 × 36 B)** — tamer-skill metadata (index, code, type, factors, sequence ids, use-state/area/availability flags). Exposed in full on the loader.
+- **§3 CsAreaCheck (93 × 64 B)** — per-skill area-restriction tables. No current server consumer; exposed for future area-gating work.
+
+Layout offsets are verified against raw bytes for sample skills (`Baby Flame` 3100111, `Mega Flame` 4100411, etc.) — all timing fields and apply rows match expected values exactly.
+
+### Query handlers swapped to bin
+
+- **`SkillCodeAssetsQueryHandler`** — was `_repository.GetSkillCodeAssetsAsync()`. Now enumerates `Skill.bin §1` and emits one `SkillCodeAssetDTO` per row with three `SkillCodeApplyAssetDTO` children built from `s_Apply[3]`. Field mapping: `Apply.Type ← s_nID`, `Apply.Attribute ← s_nA`, `Apply.Value ← s_nB`, `Apply.AdditionalValue ← s_nC`, `Apply.Chance ← s_nInvoke_Rate`, `Apply.IncreaseValue ← s_nIncrease_B_Point`. The damage formula `BaseDamage = Value + (CurrentLevel × IncreaseValue)` in `CalculateDamageOrHeal` therefore reads bin-canonical numbers (e.g. Baby Flame: Value=314, IncreaseValue=17 → level-5 damage 399).
+- **`SkillInfoAssetsQueryHandler`** — same source bin (`§1 CsSkill`), different DTO shape used by gameplay-numbers consumers. Mappings: `CastingTime ← s_fCastingTime`, `Cooldown ← s_fCooldownTime` (kept in ms), `MaxLevel ← s_nMaxLevel`, `RequiredPoints ← s_nLevelupPoint`, `UnlockLevel ← s_nLimitLevel`, `MemoryChips ← s_nReq_Item`, `Target ← s_nTarget`, `AreaOfEffect ← s_nAttSphere`, `AoEMin/MaxDamage ← s_fAttRange_Min/MaxDmg`, `Range ← s_fAttRange`, `DSUsage/HPUsage ← s_nUseDS/s_nUseHP`, `FirstSecondThirdConditionCode ← s_Apply[0..2].s_nBuffCode`, `Type ← s_nSkillType`, `FamilyType ← s_nFamilyType`. `Value` is left at 0 (no top-level Value in the bin — damage is in `apply.Value`).
+- **`TamerSkillAssetsQueryHandler`** — was `_repository.GetTamerSkillAssetsAsync()`. Now reads `Skill.bin §2 CsTamerSkill`; emits one DTO per of the 64 v487 tamer-skill rows with `SkillId ← s_nIndex`, `SkillCode ← s_dwSkillCode`. **Important divergence from the previous DB-backed implementation:** the old DB held a 22-row author-curated subset where (a) several `SkillCode` values were author-remapped to point at *different* real v487 skills, (b) six high-index entries (idx 57, 58, 60, 61, 62, 94) carried post-v487 skill codes that don't exist in v487 `Skill.bin §1` at all, and (c) `Duration` was hand-curated. The bin migration adopts the canonical v487 mapping; `Duration` defaults to `s_fDamageTime` from the matching `CsSkill` row (most v487 buff-style tamer skills had Duration matching their DamageTime in seconds anyway). Six post-v487 skills stop working as a result and the Tier B/D server-author overrides revert to canonical — both are intentional. A future bin-edit tool will re-add newer-client content.
+- **`DigimonSkillAssetsQueryHandler`** — was `_repository.GetDigimonSkillAssetsAsync()`. Now reads `Digimon_List.bin`'s per-digimon `s_Skill[4]` array (the slot-0..3 hotbar loadout for each digimon). Each non-zero slot becomes one `(Type, Slot, SkillId)` row. **Slot is 0-indexed** to match the client packet (`packet.ReadByte()` for skillSlot in `PartnerSkillPacketProcessor` reads 0..3 → F1..F4). The DB convention was the same; an off-by-one I introduced and caught during testing.
+- **`TitleStatusAssetsQueryHandler`** — was `_repository.GetTitleStatusAssetsAsync(titleId)`. Now reads `Achieve.bin` (already loaded) and finds the matching `BuffCode > 0` row by `QuestId`. Same projection as the existing `AllTitleStatusAssetsQueryHandler` — the 23 inherited `StatusDTO` stat fields stay zero (v487 has no per-title flat-stat block; title effect is the buff at `BuffCode → Buff.bin → Skill.bin`).
+
+### `DigimonListBinLoader` extension — `s_Skill[4]` + `s_nDigimonRank` exposed
+
+`Digimon_List.bin` was already parsed end-to-end (572 bytes per record), but the existing `DigimonListEntry` POCO discarded the trailing skill-loadout array and the digimon-rank field. The loader now exposes both: `Skills` (an `IReadOnlyList<DigimonSkillSlot>` of 4 entries with `SkillId` + `RequiredPrevSkillLevel`) and `Rank`. The remaining client-only fields (`s_szForm`, `s_cSoundDirName`, `s_szEvoEffectDir`, `s_fSelectScale`, `s_fWakkLen/RunLen/ARunLen`, `s_dwCharSize`) and the alt-nature list (`s_eBaseNatureTypes[3]`) are still not exposed — server has no consumer.
+
+### Pre-existing bugs surfaced + fixed
+
+- **`PartnerSkillPacketProcessor` — cType handle-encoding mask.** Client sends `targetUID = cType.m_nTypeAll` lower 32 bits = `(type << 19) | (class << 14) | idx`. Server-side `MobConfigModel.GeneralHandler = HandlerRange + mapHandler` is a flat int sitting in bits 0-19 (class+idx, no type). Comparing `0x9009C != 0x1009C` fails because the type bits the client sends aren't in the server's representation. Mask incoming `attackerHandler` and `targetHandler` with `0x7FFFF` (lower 19 bits = class+idx) before any handle-based lookup. Documented in `reference_handle_encoding.md` for the rest of the codebase — likely needed in `TamerSkillRequestPacketProcessor`, attack/sync packets, NPC interaction, party-target, etc. (those follow-ups not in this commit).
+- **`PartnerSkillPacketProcessor` — AoE-branch single-target fallback.** The `else if (skill.SkillInfo.AoEMaxDamage > 0)` gate routes single-target skills like Baby Flame (Target=51, AoEMaxDamage=1700) into `GetMobsNearbyTargetMob`, which can return empty when the target handler doesn't match `.Mobs`. The DSO author treated `AoEMinDamage/MaxDamage` as an AoE indicator, but in the bin/DB those are the *regular* damage-roll min/max for any skill. True AoE skills have `AreaOfEffect > 0` and take the first branch. Fix: when the AoE-near-target lookup yields no mobs, fall back to direct `GetMobByHandler` single-target lookup. Doesn't change semantics for skills that genuinely had AoE-near-target intent (rare in v487).
+- **`MapServerBaseOperation.GetMobsNearbyTargetMob` / `GetMobsNearbyPartner`** — both overloads (regular + summon) used to `return default` (= `null` for `List<T>`) when the map or origin mob wasn't found. Callers `AddRange`d the result blindly. Returns `new List<T>()` now; safer for any future caller and lets the AoE→single fallback above behave correctly.
+
+### `Game.Host/Program.cs` — DI + boot-load + log
+
+`SkillBinLoader` registered as singleton, eagerly loaded after `Build()` (mirrors the existing pattern for the other 7 bin loaders), boot log line added: `"Loaded Skill.bin: 5322 CsSkill + 64 CsTamerSkill + 93 CsAreaCheck rows"`.
+
+After this change, **8 bins are live in Game.Host** (DMBase, Digimon_List, DigimonEvo, Buff, Achieve, EventTable, CashShop, Skill) and **41 of the original 60 distinct queries are off DB** (this round retires 5: SkillCode, SkillInfo, TamerSkill, DigimonSkill, TitleStatus). Remaining queries belong to bins not yet migrated (Map / Npc / Item / Quest / Monster / MasterCard / etc).
+
+---
+
 ## ItemModelBehavior.ToArray — pack ItemId+Amount into the cItemData bitfield
 
 The v487 client's `RecvInvenResult` (`cCliGameReceive.cpp:8505`) handles inventory + warehouse + sharestash through one path that memcpys each entry as `cItemData` — where `m_nType : 17 | m_nCount : 15` share a single 32-bit field (`m_nAll`). The pre-existing `ItemModelBehavior.ToArray` was writing `ItemId` and `Amount` as TWO separate `u4`s, so the client decoded `m_nType` correctly but `m_nCount` came out as 0 and the icon renderer fell back to "1" everywhere — gift CLAIM into inventory, cash-shop multi-buy quantity, normal shop buys with stack size > 1, etc. The same bug existed (and was already fixed) in `GiftToArray` for the gift-box path; this commit applies the same pack to `ToArray`. Bytes 0-3 now carry `((Amount & 0x7FFF) << 17) | (ItemId & 0x1FFFF)`; bytes 4-7 are zeroed where the old `Amount` u4 used to live; everything past byte 8 is unchanged (accessory / socket / expiry / power / level fields all stay at their previous offsets per the prior "don't reshape the rest of the struct" guidance).

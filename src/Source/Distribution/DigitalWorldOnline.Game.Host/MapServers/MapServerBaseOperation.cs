@@ -380,7 +380,7 @@ namespace DigitalWorldOnline.GameHost
         {
             var targetMap = Maps.FirstOrDefault(x => x.MapId == location.MapId);
             if (targetMap == null)
-                return default;
+                return new List<MobConfigModel>();
 
             var originX = location.X;
             var originY = location.Y;
@@ -392,12 +392,12 @@ namespace DigitalWorldOnline.GameHost
         {
             var targetMap = Maps.FirstOrDefault(x => x.MapId == mapId);
             if (targetMap == null)
-                return default;
+                return new List<MobConfigModel>();
 
             var originMob = targetMap.Mobs.FirstOrDefault(x => x.GeneralHandler == handler);
 
             if (originMob == null)
-                return default;
+                return new List<MobConfigModel>();
 
             var originX = originMob.CurrentLocation.X;
             var originY = originMob.CurrentLocation.Y;
@@ -435,7 +435,7 @@ namespace DigitalWorldOnline.GameHost
         {
             var targetMap = Maps.FirstOrDefault(x => x.MapId == location.MapId);
             if (targetMap == null)
-                return default;
+                return new List<SummonMobModel>();
 
             var originX = location.X;
             var originY = location.Y;
@@ -447,12 +447,12 @@ namespace DigitalWorldOnline.GameHost
         {
             var targetMap = Maps.FirstOrDefault(x => x.MapId == mapId);
             if (targetMap == null)
-                return default;
+                return new List<SummonMobModel>();
 
             var originMob = targetMap.SummonMobs.FirstOrDefault(x => x.GeneralHandler == handler);
 
             if (originMob == null)
-                return default;
+                return new List<SummonMobModel>();
 
             var originX = originMob.CurrentLocation.X;
             var originY = originMob.CurrentLocation.Y;

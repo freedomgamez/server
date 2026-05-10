@@ -49,6 +49,18 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var attackerHandler = packet.ReadInt();
             var targetHandler = packet.ReadInt();
 
+            // Client sends `cType.m_nTypeAll` lower 32 bits as targetUID — that's the
+            // packed (type << 19) | (class << 14) | idx encoding from v487's pType.h.  The
+            // server's MobConfigModel.GeneralHandler is (HandlerRange + mapHandler), which
+            // sits in the lower 19 bits (class + idx, no type).  So we strip the type
+            // portion before any handler comparison: mask to 0x7FFFF.  Without this, the
+            // lookup against `.Mobs.FirstOrDefault(x => x.GeneralHandler == handler)`
+            // never matches because the client send carries type bits that the server
+            // representation doesn't.  Same applies for the attackerHandler.
+            const int CTypeClassIdxMask = 0x7FFFF;
+            attackerHandler &= CTypeClassIdxMask;
+            targetHandler &= CTypeClassIdxMask;
+
             if (client.Partner == null)
                 return Task.CompletedTask;
 
@@ -679,6 +691,23 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         var targets = _mapServer.GetMobsNearbyTargetMob(client.Tamer.Location.MapId, targetHandler, skill.SkillInfo.Range / 10);
 
                         targetMobs.AddRange(targets);
+
+                        // Fallback to single-target lookup when AoE-near-target finds no mobs.
+                        // AoEMinDamage/MaxDamage in the bin is the regular damage roll range
+                        // for ANY skill, not an AoE-only flag — single-target skills like
+                        // Baby Flame (Target=51, AoEMaxDamage=1700) wrongly route here, then
+                        // GetMobsNearbyTargetMob can return empty because the handler may not
+                        // be in .Mobs for the relevant collection.  True AoE skills have
+                        // AreaOfEffect > 0 and take the first branch.
+                        if (!targetMobs.Any())
+                        {
+                            var mob = _mapServer.GetMobByHandler(client.Tamer.Location.MapId, targetHandler);
+                            if (mob != null)
+                            {
+                                skillType = SkillTypeEnum.Single;
+                                targetMobs.Add(mob);
+                            }
+                        }
                     }
                     else
                     {

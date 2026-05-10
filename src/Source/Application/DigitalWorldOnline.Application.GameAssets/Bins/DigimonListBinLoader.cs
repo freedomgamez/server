@@ -108,6 +108,23 @@ public sealed class DigimonListBinLoader
         byte digimonType = rec[392];
         // s_dwCharSize at offset 394 is intentionally not loaded (visual scale, server unused).
 
+        // s_Skill[4] at offset 396, 4 × 8B = 32B.  Each slot is { DWORD s_dwID; int s_nReqPrevSkillLevel }.
+        // Slot index in the array = client F1..F4 hotbar position; this is the per-digimon skill
+        // loadout the server's DigimonSkillAssetsQuery resolves through.  Zero-id slots represent
+        // unfilled / not-yet-unlocked slots — kept in the list (consumers compare against zero).
+        var skills = new DigimonSkillSlot[4];
+        for (int s = 0; s < 4; s++)
+        {
+            int o = 396 + s * 8;
+            int skillId = BitConverter.ToInt32(rec[o..(o + 4)]);
+            int reqPrev = BitConverter.ToInt32(rec[(o + 4)..(o + 8)]);
+            skills[s] = new DigimonSkillSlot(skillId, reqPrev);
+        }
+
+        // s_fWakkLen/RunLen/ARunLen at 428/432/436 (animation distances) and s_szForm at 440
+        // (UI form string) are intentionally skipped — client rendering only.
+        int rank = BitConverter.ToInt32(rec[568..572]);
+
         return new DigimonListEntry(
             Type: type,
             Model: model,
@@ -121,7 +138,9 @@ public sealed class DigimonListBinLoader
             Family2: family2,
             Family3: family3,
             HP: hp, DS: ds, DefPower: def, Evasion: eva, MoveSpeed: ms,
-            CriticalRate: crit, AttPower: att, AttSpeed: attSpd, AttRange: attRng, HitRate: hit);
+            CriticalRate: crit, AttPower: att, AttSpeed: attSpd, AttRange: attRng, HitRate: hit,
+            Skills: skills,
+            Rank: rank);
     }
 
     private static string ReadWStringField(ReadOnlySpan<byte> field)

@@ -107,6 +107,7 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<AchieveBinLoader>();
                     services.AddSingleton<EventTableBinLoader>();
                     services.AddSingleton<CashShopBinLoader>();
+                    services.AddSingleton<SkillBinLoader>();
 
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
                     services.AddSingleton<IProcessor, GamePacketProcessor>();
@@ -139,6 +140,7 @@ namespace DigitalWorldOnline.Game
             var achieve = host.Services.GetRequiredService<AchieveBinLoader>().Load();
             var eventTable = host.Services.GetRequiredService<EventTableBinLoader>().Load();
             var cashShop = host.Services.GetRequiredService<CashShopBinLoader>().Load();
+            var skill = host.Services.GetRequiredService<SkillBinLoader>().Load();
 
             // DMBase.bin section 7 MaxShareStash drives the AccountWarehouse default size
             // so the server matches what v487 client expects (Warehouse.cpp:81 reads s_nMaxShareStash).
@@ -173,6 +175,9 @@ namespace DigitalWorldOnline.Game
             serilog.Information(
                 "Loaded CashShop.bin: {Total} default-table products ({Active} active)",
                 cashShop.ByProductId.Count, cashShop.ByProductId.Values.Count(p => p.Active));
+            serilog.Information(
+                "Loaded Skill.bin: {Skills} CsSkill + {TamerSkills} CsTamerSkill + {Areas} CsAreaCheck rows",
+                skill.ById.Count, skill.TamerSkillsByIndex.Count, skill.AreaChecksByIndex.Count);
 
             return host;
         }
