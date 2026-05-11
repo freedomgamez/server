@@ -35,7 +35,10 @@
         /// <param name="points">Points to increase</param>
         public void DecreaseSkillPoints(byte points)
         {
-            SkillPoints -= points;
+            // Clamp at 0 — SkillPoints is byte; any underflow would wrap to 255+.
+            // Callers gate on `SkillPoints >= cost` but this defends against double-spend
+            // / race / future-caller mistakes.
+            SkillPoints = points >= SkillPoints ? (byte)0 : (byte)(SkillPoints - points);
         }
         /// <summary>
         /// Inserts new skills into the list.

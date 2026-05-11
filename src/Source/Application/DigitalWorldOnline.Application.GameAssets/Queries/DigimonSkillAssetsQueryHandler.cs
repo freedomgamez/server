@@ -38,7 +38,11 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
                         Id = ++syntheticId,
                         Type = digimon.Type,
                         Slot = (byte)s,           // 0-indexed: matches client packet's skillSlot
-                        SkillId = slot.SkillId
+                        SkillId = slot.SkillId,
+                        // bin's s_nReqPrevSkillLevel — gate for the skill-up prereq check
+                        // mirrored from client DigimonSkill.cpp:113.  Clamped to byte: client
+                        // field is int but values are small (≤ MaxLevel ≤ 50).
+                        RequiredLevel = (byte)System.Math.Clamp(slot.RequiredPrevSkillLevel, 0, byte.MaxValue),
                     });
                 }
             }

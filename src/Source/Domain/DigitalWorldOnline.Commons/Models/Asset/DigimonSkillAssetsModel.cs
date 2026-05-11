@@ -23,6 +23,13 @@
         public int SkillId { get; set; }
 
         /// <summary>
+        /// Required level of the previous skill slot before this slot can be leveled up.
+        /// Mirrors client <c>CsDigimon::sINFO::s_Skill[i].s_nReqPrevSkillLevel</c> (see
+        /// <c>DigimonSkill.cpp:113</c>).  0 = no prerequisite gate.
+        /// </summary>
+        public byte RequiredLevel { get; private set; }
+
+        /// <summary>
         /// Detailed skill information.
         /// </summary>
         public SkillInfoAssetModel SkillInfo { get; private set; }

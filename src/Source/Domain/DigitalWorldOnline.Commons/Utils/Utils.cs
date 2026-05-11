@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
+using DigitalWorldOnline.Commons.Models.Asset;
 using DigitalWorldOnline.Commons.Writers;
 using System.Diagnostics;
 
@@ -316,8 +317,76 @@ namespace DigitalWorldOnline.Commons.Utils
                     ).ToUnixTimeSeconds();
         }
 
+        // ─── Nature.bin / New_Element.bin driven combat multipliers ─────────
+        // Populated at Game.Host boot via RegisterNatureSource(...).  Until then the
+        // helpers fall back to a hardcoded binary advantage table (the pre-bin behaviour)
+        // so unit tests / Character.Host / Routine.Host that don't load the bin still work.
+
+        private static NatureData? _natureSource;
+
+        /// <summary>
+        /// Register the primary (preferred) and optional fallback nature matrices.
+        /// Called once at Game.Host boot.  Subsequent calls overwrite (used by tooling).
+        /// </summary>
+        public static void RegisterNatureSource(NatureData primary, NatureData? fallback = null)
+        {
+            _natureSource = primary;
+            _natureFallback = fallback;
+        }
+
+        private static NatureData? _natureFallback;
+
+        /// <summary>
+        /// Percent delta to apply to base damage when an attacker of <paramref name="hitter"/>
+        /// nature hits a target of <paramref name="target"/> nature.  v487 bin values are
+        /// -25 / 0 / +25.  Formula at the call site: <c>dmg = base * (100 + delta) / 100</c>.
+        /// Returns 0 when no bin is loaded.
+        /// </summary>
+        public static int GetElementDelta(this DigimonElementEnum hitter, DigimonElementEnum target)
+        {
+            if (_natureSource is not null)
+            {
+                short v = _natureSource.GetElementDelta(hitter, target);
+                if (v != 0) return v;
+                // 0 from primary may legitimately mean "no bonus" — only fall back when
+                // the primary doesn't carry the row at all.
+                if (_natureSource.ElementDeltaPercent.ContainsKey(hitter)) return 0;
+            }
+            if (_natureFallback is not null)
+                return _natureFallback.GetElementDelta(hitter, target);
+            return 0;
+        }
+
+        /// <summary>
+        /// Attribute multiplier (absolute percent, default 100 = no change) for the
+        /// Data/Vaccine/Virus triangle.  90 / 100 / 110 in v487's BaseElement table.
+        /// </summary>
+        public static int GetAttributePoint(this DigimonAttributeEnum hitter, DigimonAttributeEnum target, AttributeCompare cmp = AttributeCompare.Attack)
+        {
+            if (_natureSource is not null)
+            {
+                int v = _natureSource.GetAttributePoint(cmp, hitter, target);
+                if (v != 100) return v;
+                // 100 may be a legitimate "equal" — fall back only when primary missing the row.
+                if (_natureSource.AttributePoint.TryGetValue(cmp, out var byCmp) && byCmp.ContainsKey(hitter)) return 100;
+            }
+            if (_natureFallback is not null)
+                return _natureFallback.GetAttributePoint(cmp, hitter, target);
+            return 100;
+        }
+
+        /// <summary>
+        /// Legacy boolean wrapper — true when the attacker gets a positive multiplier vs
+        /// the target.  Kept so existing call sites that only need the flag don't need
+        /// rewriting.  When the bin isn't loaded, falls back to the original hardcoded
+        /// triangle (Data→Vaccine, Vaccine→Virus, Virus→Data, Unknown→all).
+        /// </summary>
         public static bool HasAttributeAdvantage(this DigimonAttributeEnum hitter, DigimonAttributeEnum target)
         {
+            if (_natureSource is not null || _natureFallback is not null)
+                return hitter.GetAttributePoint(target) > 100;
+
+            // Fallback for non-Game.Host contexts that never registered a nature source.
             return hitter switch
             {
                 DigimonAttributeEnum.Data => target == DigimonAttributeEnum.None || target == DigimonAttributeEnum.Vaccine,
@@ -328,8 +397,15 @@ namespace DigitalWorldOnline.Commons.Utils
             };
         }
 
+        /// <summary>
+        /// Legacy boolean wrapper — true when the attacker has a positive element delta.
+        /// Hardcoded fallback (binary triangle) only used when the bin isn't loaded.
+        /// </summary>
         public static bool HasElementAdvantage(this DigimonElementEnum hitter, DigimonElementEnum target)
         {
+            if (_natureSource is not null || _natureFallback is not null)
+                return hitter.GetElementDelta(target) > 0;
+
             return hitter switch
             {
                 DigimonElementEnum.Ice => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Water,

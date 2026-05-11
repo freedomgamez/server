@@ -26,6 +26,13 @@ namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Assets
                 .Property(e => e.SkillId)
                 .HasColumnType("int")
                 .IsRequired();
+
+            // s_Skill[i].s_nReqPrevSkillLevel from Digimon_List.bin — previous-slot gate.
+            builder
+                .Property(e => e.RequiredLevel)
+                .HasColumnType("tinyint unsigned")
+                .HasDefaultValue((byte)0)
+                .IsRequired();
         }
     }
 }
