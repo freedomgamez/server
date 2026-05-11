@@ -4,9 +4,18 @@ using DigitalWorldOnline.Commons.Models.Digimon;
 
 namespace DigitalWorldOnline.Commons.Models.Map
 {
-    public sealed partial class GameMap
+    public sealed partial class MapInstance
     {
-        public bool CloseMap => (DateTime.Now - WithoutTamers).TotalHours >= 2; //TODO: externalizar
+        /// <summary>
+        /// Manual teardown flag — Phase E auto-scale-down sets this when a
+        /// non-baseline channel is idle and another channel has headroom.
+        /// </summary>
+        private bool _markedForClose;
+
+        public bool CloseMap => _markedForClose || (DateTime.Now - WithoutTamers).TotalHours >= 2; //TODO: externalizar
+
+        /// <summary>Phase E auto-scale-down: mark this channel for teardown on the next CleanIdle pass.</summary>
+        public void MarkForClose() => _markedForClose = true;
 
         public List<CharacterModel> Tamers =>
             Clients

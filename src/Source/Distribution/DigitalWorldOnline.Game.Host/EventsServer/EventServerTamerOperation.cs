@@ -18,7 +18,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
 {
     public sealed partial class EventServer
     {
-        public Task TamerOperation(GameMap map)
+        public Task TamerOperation(MapInstance map)
         {
             if (!map.ConnectedTamers.Any())
             {
@@ -139,7 +139,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             return Task.CompletedTask;
         }
 
-        private void GetInViewMobs(GameMap map, CharacterModel tamer)
+        private void GetInViewMobs(MapInstance map, CharacterModel tamer)
         {
             map.Mobs.ForEach(mob =>
             {
@@ -157,7 +157,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             });
         }
 
-        private void ShowOrHideTamer(GameMap map, CharacterModel tamer)
+        private void ShowOrHideTamer(MapInstance map, CharacterModel tamer)
         {
             foreach (var connectedTamer in map.ConnectedTamers.Where(x => x.Id != tamer.Id))
             {
@@ -174,7 +174,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             }
         }
 
-        private void ShowTamer(GameMap map, CharacterModel tamerToShow, long tamerToSeeId)
+        private void ShowTamer(MapInstance map, CharacterModel tamerToShow, long tamerToSeeId)
         {
             if (!map.ViewingTamer(tamerToShow.Id, tamerToSeeId))
             {
@@ -195,7 +195,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             }
         }
 
-        private void HideTamer(GameMap map, CharacterModel tamerToHide, long tamerToBlindId)
+        private void HideTamer(MapInstance map, CharacterModel tamerToHide, long tamerToBlindId)
         {
             if (map.ViewingTamer(tamerToHide.Id, tamerToBlindId))
             {

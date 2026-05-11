@@ -2,6 +2,7 @@
 using DigitalWorldOnline.Application.Separar.Queries;
 using DigitalWorldOnline.Application.GameAssets.Queries;
 using DigitalWorldOnline.Commons.Entities;
+using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Models.Base;
 using DigitalWorldOnline.Commons.Models.Character;
@@ -22,7 +23,7 @@ namespace DigitalWorldOnline.GameHost
 {
     public sealed partial class DungeonsServer
     {
-        public void TamerOperation(GameMap map)
+        public void TamerOperation(MapInstance map)
         {
             if (!map.ConnectedTamers.Any())
             {
@@ -407,7 +408,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void GetInViewMobs(GameMap map, CharacterModel tamer)
+        private void GetInViewMobs(MapInstance map, CharacterModel tamer)
         {
             List<long> mobsToAdd = new List<long>();
             List<long> mobsToRemove = new List<long>();
@@ -447,7 +448,7 @@ namespace DigitalWorldOnline.GameHost
             mobsToRemove.ForEach(id => tamer.MobsInView.Remove(id));
         }
 
-        private void GetInViewMobs(GameMap map, CharacterModel tamer, bool Summon)
+        private void GetInViewMobs(MapInstance map, CharacterModel tamer, bool Summon)
         {
             List<long> mobsToAdd = new List<long>();
             List<long> mobsToRemove = new List<long>();
@@ -490,7 +491,10 @@ namespace DigitalWorldOnline.GameHost
         /// <param name="digimons">Current digimons</param>
         public void SetDigimonHandlers(int mapId, List<DigimonModel> digimons)
         {
-            Maps.FirstOrDefault(x => x.MapId == mapId)?.SetDigimonHandlers(digimons);
+            // TODO Phase E: dungeons are party-instanced, multiple instances can
+            // share a MapId.  Caller currently has no party-context; mirrors the
+            // pre-rework FirstOrDefault semantic (first dungeon instance wins).
+            _registry.GetChannelsOf(MapTypeEnum.Dungeon, mapId).FirstOrDefault()?.SetDigimonHandlers(digimons);
         }
 
         /// <summary>
@@ -501,10 +505,11 @@ namespace DigitalWorldOnline.GameHost
         /// <param name="newPartner">New partner</param>
         public void SwapDigimonHandlers(int mapId, DigimonModel oldPartner, DigimonModel newPartner)
         {
-            Maps.FirstOrDefault(x => x.MapId == mapId)?.SwapDigimonHandlers(oldPartner, newPartner);
+            // TODO Phase E: ambiguous like SetDigimonHandlers above.
+            _registry.GetChannelsOf(MapTypeEnum.Dungeon, mapId).FirstOrDefault()?.SwapDigimonHandlers(oldPartner, newPartner);
         }
 
-        private void ShowOrHideTamer(GameMap map, CharacterModel tamer)
+        private void ShowOrHideTamer(MapInstance map, CharacterModel tamer)
         {
             foreach (var connectedTamer in map.ConnectedTamers.Where(x => x.Id != tamer.Id))
             {
@@ -521,7 +526,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void ShowTamer(GameMap map, CharacterModel tamerToShow, long tamerToSeeId)
+        private void ShowTamer(MapInstance map, CharacterModel tamerToShow, long tamerToSeeId)
         {
             if (!map.ViewingTamer(tamerToShow.Id, tamerToSeeId))
             {
@@ -548,7 +553,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void HideTamer(GameMap map, CharacterModel tamerToHide, long tamerToBlindId)
+        private void HideTamer(MapInstance map, CharacterModel tamerToHide, long tamerToBlindId)
         {
             if (map.ViewingTamer(tamerToHide.Id, tamerToBlindId))
             {

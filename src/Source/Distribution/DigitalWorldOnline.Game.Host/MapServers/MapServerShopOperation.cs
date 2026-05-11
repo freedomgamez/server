@@ -9,7 +9,7 @@ namespace DigitalWorldOnline.GameHost
 {
     public sealed partial class MapServer
     {
-        private void ShowOrHideConsignedShop(GameMap map, CharacterModel tamer)
+        private void ShowOrHideConsignedShop(MapInstance map, CharacterModel tamer)
         {
             var shopsToShow = map.ConsignedShops
                 .Where(x => x.Channel == tamer.Channel)
@@ -33,7 +33,7 @@ namespace DigitalWorldOnline.GameHost
           
         }
 
-        private void ShowConsignedShop(GameMap map, ConsignedShop shopToShow, long tamerToSeeId)
+        private void ShowConsignedShop(MapInstance map, ConsignedShop shopToShow, long tamerToSeeId)
         {
             if (!map.ViewingConsignedShop(shopToShow.Id, tamerToSeeId))
             {
@@ -45,7 +45,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void HideConsignedShop(GameMap map, ConsignedShop shopToHide, long tamerToBlindId)
+        private void HideConsignedShop(MapInstance map, ConsignedShop shopToHide, long tamerToBlindId)
         {
             if (map.ViewingConsignedShop(shopToHide.Id, tamerToBlindId))
             {

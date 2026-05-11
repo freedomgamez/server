@@ -5,7 +5,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
 {
     public sealed partial class EventServer
     {
-        private Task DropsOperation(GameMap map)
+        private Task DropsOperation(MapInstance map)
         {
             if (!map.ConnectedTamers.Any())
                 return Task.CompletedTask;
@@ -41,7 +41,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             return Task.CompletedTask;
         }
 
-        private void ShowAndHideDrop(GameMap map, Drop drop, List<long> nearTamers, List<long> farTamers)
+        private void ShowAndHideDrop(MapInstance map, Drop drop, List<long> nearTamers, List<long> farTamers)
         {
             foreach (var targetTamer in nearTamers)
             {
@@ -66,7 +66,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             }
         }
 
-        private void CheckLostDrop(GameMap map, Drop drop)
+        private void CheckLostDrop(MapInstance map, Drop drop)
         {
             if (!drop.Lost && !drop.Thrown && drop.NoOwner)
             {

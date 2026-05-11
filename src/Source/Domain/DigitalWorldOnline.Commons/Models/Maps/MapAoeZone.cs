@@ -3,7 +3,7 @@ using System;
 namespace DigitalWorldOnline.Commons.Models.Map
 {
     /// <summary>
-    /// A persistent area-of-effect zone on a <see cref="GameMap"/>.  Used by mob skills
+    /// A persistent area-of-effect zone on a <see cref="MapInstance"/>.  Used by mob skills
     /// whose effect lingers in space + time: ATTACH_SEED (18), Region_Buff_Nesting (23),
     /// RandomAoE (27 — degenerate one-tick), CONTINUE_WIDE_ATTACK (20 — anchored to caster).
     ///
@@ -23,13 +23,13 @@ namespace DigitalWorldOnline.Commons.Models.Map
         public int TickIntervalMs { get; }
         public DateTime NextTick { get; private set; }
         public int TicksRemaining { get; private set; }
-        public Action<MapAoeZone, GameMap> OnTick { get; }
+        public Action<MapAoeZone, MapInstance> OnTick { get; }
 
         public MapAoeZone(
             int casterHandler, int skillIndex,
             int centerX, int centerY, int radius,
             int tickIntervalMs, int ticks,
-            Action<MapAoeZone, GameMap> onTick)
+            Action<MapAoeZone, MapInstance> onTick)
         {
             CasterHandler = casterHandler;
             SourceSkillIndex = skillIndex;
@@ -44,7 +44,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
         }
 
         /// <summary>Returns true if this zone should be removed after this call.</summary>
-        public bool Tick(GameMap map)
+        public bool Tick(MapInstance map)
         {
             var now = DateTime.Now;
             while (TicksRemaining > 0 && now >= NextTick)

@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Commons.Entities;
+using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Enums.Map;
 using DigitalWorldOnline.Commons.Extensions;
@@ -25,7 +26,7 @@ namespace DigitalWorldOnline.GameHost
 {
     public sealed partial class MapServer
     {
-        private void MonsterOperation(GameMap map)
+        private void MonsterOperation(MapInstance map)
         {
             if (!map.ConnectedTamers.Any())
                 return;
@@ -190,7 +191,7 @@ namespace DigitalWorldOnline.GameHost
         /// Monster.bin catalog and register them via the existing <see cref="AddSummonMobs"/>
         /// path (handler allocation + spawn broadcast).  Catalog miss is logged once.
         /// </summary>
-        private void DrainPendingSummons(GameMap map)
+        private void DrainPendingSummons(MapInstance map)
         {
             var pending = map.DrainPendingSummons();
             if (pending.Count == 0) return;
@@ -241,7 +242,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void MobsOperation(GameMap map, MobConfigModel mob)
+        private void MobsOperation(MapInstance map, MobConfigModel mob)
         {
 
             switch (mob.CurrentAction)
@@ -531,7 +532,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private static void CheckDebuff(GameMap map, MobConfigModel mob, List<MobDebuffModel> debuffs)
+        private static void CheckDebuff(MapInstance map, MobConfigModel mob, List<MobDebuffModel> debuffs)
         {
 
 
@@ -572,7 +573,7 @@ namespace DigitalWorldOnline.GameHost
 
         }
 
-        private static void TargetKillSpawn(GameMap map, MobConfigModel mob)
+        private static void TargetKillSpawn(MapInstance map, MobConfigModel mob)
         {
             var targetKillSpawn = map.KillSpawns.FirstOrDefault(x => x.TargetMobs.Any(x => x.TargetMobType == mob.Type));
 
@@ -593,7 +594,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private static void SourceKillSpawn(GameMap map, MobConfigModel mob)
+        private static void SourceKillSpawn(MapInstance map, MobConfigModel mob)
         {
             var sourceMobKillSpawn = map.KillSpawns.FirstOrDefault(ks => ks.SourceMobs.Any(sm => sm.SourceMobType == mob.Type));
 
@@ -630,7 +631,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void QuestKillReward(GameMap map, MobConfigModel mob)
+        private void QuestKillReward(MapInstance map, MobConfigModel mob)
         {
             var partyIdList = new List<int>();
 
@@ -752,7 +753,7 @@ namespace DigitalWorldOnline.GameHost
             partyIdList.Clear();
         }
 
-        private void ItemsReward(GameMap map, MobConfigModel mob)
+        private void ItemsReward(MapInstance map, MobConfigModel mob)
         {
             if (mob.DropReward == null)
                 return;
@@ -784,7 +785,7 @@ namespace DigitalWorldOnline.GameHost
 
         private static readonly System.Collections.Generic.HashSet<int> _bossDivergenceLogged = new();
 
-        private void ExperienceReward(GameMap map, MobConfigModel mob)
+        private void ExperienceReward(MapInstance map, MobConfigModel mob)
         {
             if (mob.ExpReward == null)
                 return;
@@ -869,7 +870,7 @@ namespace DigitalWorldOnline.GameHost
         }
 
 
-        private void SkillExpReward(GameMap map, GameClient? targetClient)
+        private void SkillExpReward(MapInstance map, GameClient? targetClient)
         {
 
 
@@ -899,7 +900,7 @@ namespace DigitalWorldOnline.GameHost
         }
 
         private async Task PartyExperienceReward(
-            GameMap map,
+            MapInstance map,
             MobConfigModel mob,
             List<int> partyIdList,
             GameClient? targetClient,
@@ -956,7 +957,7 @@ namespace DigitalWorldOnline.GameHost
         }
 
         private async Task PartyExperienceReward(
-          GameMap map,
+          MapInstance map,
           SummonMobModel mob,
           List<int> partyIdList,
           GameClient? targetClient,
@@ -1011,7 +1012,7 @@ namespace DigitalWorldOnline.GameHost
                 }
             }
         }
-        private void DropReward(GameMap map, MobConfigModel mob)
+        private void DropReward(MapInstance map, MobConfigModel mob)
         {
             var targetClient = map.Clients.FirstOrDefault(x => x.TamerId == mob.TargetTamer?.Id);
             if (targetClient == null)
@@ -1022,7 +1023,7 @@ namespace DigitalWorldOnline.GameHost
             ItemDropReward(map, mob, targetClient);
         }
 
-        private void BitDropReward(GameMap map, MobConfigModel mob, GameClient? targetClient)
+        private void BitDropReward(MapInstance map, MobConfigModel mob, GameClient? targetClient)
         {
             // FATIGUE_HOOK: scale bit-drop chance by playtime-fatigue multiplier.
             var fatigueDrop = (double)_fatigueService.GetMultipliers(targetClient).drop;
@@ -1065,7 +1066,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void ItemDropReward(GameMap map, MobConfigModel mob, GameClient? targetClient)
+        private void ItemDropReward(MapInstance map, MobConfigModel mob, GameClient? targetClient)
         {
             if (!mob.DropReward.Drops.Any())
                 return;
@@ -1167,7 +1168,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void QuestDropReward(GameMap map, MobConfigModel mob)
+        private void QuestDropReward(MapInstance map, MobConfigModel mob)
         {
             var itemsReward = new List<ItemDropConfigModel>();
             itemsReward.AddRange(mob.DropReward.Drops);
@@ -1267,7 +1268,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void RaidReward(GameMap map, MobConfigModel mob)
+        private void RaidReward(MapInstance map, MobConfigModel mob)
         {
             var raidResult = mob.RaidDamage.Where(x => x.Key > 0).DistinctBy(x => x.Key);
 
@@ -1384,7 +1385,10 @@ namespace DigitalWorldOnline.GameHost
                 {
                     var mapId = 1300 + x;
 
-                    var currentMap = Maps.FirstOrDefault(x => x.Clients.Any() && x.MapId == mapId);
+                    // TODO Phase E: Bless boss affects ALL channels of the
+                    // surrounding maps, not just channel 0.  Iterate channels.
+                    var currentMap = _registry.GetChannelsOf(MapTypeEnum.Default, mapId)
+                        .FirstOrDefault(c => c.Clients.Any());
 
                     if (currentMap != null)
                     {
@@ -1421,7 +1425,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void RaidReward(GameMap map, SummonMobModel mob)
+        private void RaidReward(MapInstance map, SummonMobModel mob)
         {
             var raidResult = mob.RaidDamage.Where(x => x.Key > 0).DistinctBy(x => x.Key);
 
@@ -1512,7 +1516,7 @@ namespace DigitalWorldOnline.GameHost
             updateItemList.ForEach(itemList => { _sender.Send(new UpdateItemsCommand(itemList)); });
         }
 
-        private void MobsOperation(GameMap map, SummonMobModel mob)
+        private void MobsOperation(MapInstance map, SummonMobModel mob)
         {
 
             switch (mob.CurrentAction)
@@ -1712,7 +1716,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void QuestKillReward(GameMap map, SummonMobModel mob)
+        private void QuestKillReward(MapInstance map, SummonMobModel mob)
         {
             var partyIdList = new List<int>();
 
@@ -1831,7 +1835,7 @@ namespace DigitalWorldOnline.GameHost
             partyIdList.Clear();
         }
 
-        private void ItemsReward(GameMap map, SummonMobModel mob)
+        private void ItemsReward(MapInstance map, SummonMobModel mob)
         {
             if (mob.DropReward == null)
                 return;
@@ -1844,7 +1848,7 @@ namespace DigitalWorldOnline.GameHost
                 DropReward(map, mob);
         }
 
-        private void ExperienceReward(GameMap map, SummonMobModel mob)
+        private void ExperienceReward(MapInstance map, SummonMobModel mob)
         {
             if (mob.ExpReward == null)
                 return;
@@ -1907,7 +1911,7 @@ namespace DigitalWorldOnline.GameHost
 
             partyIdList.Clear();
         }
-        private void DropReward(GameMap map, SummonMobModel mob)
+        private void DropReward(MapInstance map, SummonMobModel mob)
         {
             var targetClient = map.Clients.FirstOrDefault(x => x.TamerId == mob.TargetTamer?.Id);
             if (targetClient == null)
@@ -1918,7 +1922,7 @@ namespace DigitalWorldOnline.GameHost
             ItemDropReward(map, mob, targetClient);
         }
 
-        private void BitDropReward(GameMap map, SummonMobModel mob, GameClient? targetClient)
+        private void BitDropReward(MapInstance map, SummonMobModel mob, GameClient? targetClient)
         {
             // FATIGUE_HOOK
             var fatigueDrop = (double)_fatigueService.GetMultipliers(targetClient).drop;
@@ -1961,7 +1965,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void ItemDropReward(GameMap map, SummonMobModel mob, GameClient? targetClient)
+        private void ItemDropReward(MapInstance map, SummonMobModel mob, GameClient? targetClient)
         {
             if (!mob.DropReward.Drops.Any())
                 return;
@@ -2063,7 +2067,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void QuestDropReward(GameMap map, SummonMobModel mob)
+        private void QuestDropReward(MapInstance map, SummonMobModel mob)
         {
             var itemsReward = new List<SummonMobItemDropModel>();
             itemsReward.AddRange(mob.DropReward.Drops);

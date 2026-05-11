@@ -207,7 +207,11 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             //    .Key : character.Channel;
             //}
 
-            character.SetCurrentChannel(0);
+            // Phase E: do NOT hard-reset Channel to 0 — that overrides a switch
+            // request mid-flight.  MapServer.AddClient -> PickChannelFor honours
+            // the persisted Channel when it points at a live initialized
+            // channel of the target map, and falls back to lowest-populated
+            // otherwise.
 
             character.UpdateState(CharacterStateEnum.Loading);
 

@@ -12,7 +12,7 @@ namespace DigitalWorldOnline.GameHost
 {
     public sealed partial class PvpServer
     {
-        public void TamerOperation(GameMap map)
+        public void TamerOperation(MapInstance map)
         {
             if (!map.ConnectedTamers.Any())
             {
@@ -172,7 +172,7 @@ namespace DigitalWorldOnline.GameHost
                 Console.WriteLine($"TamersOperation ({map.ConnectedTamers.Count}): {totalTime}.");
         }
 
-        private void ShowOrHideTamer(GameMap map, CharacterModel tamer)
+        private void ShowOrHideTamer(MapInstance map, CharacterModel tamer)
         {
             foreach (var connectedTamer in map.ConnectedTamers.Where(x => x.Id != tamer.Id))
             {
@@ -180,7 +180,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void ShowTamer(GameMap map, CharacterModel tamerToShow, long tamerToSeeId)
+        private void ShowTamer(MapInstance map, CharacterModel tamerToShow, long tamerToSeeId)
         {
             if (!map.ViewingTamer(tamerToShow.Id, tamerToSeeId))
             {

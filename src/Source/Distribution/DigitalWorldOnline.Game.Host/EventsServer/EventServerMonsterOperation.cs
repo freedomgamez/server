@@ -16,7 +16,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
 {
     public sealed partial class EventServer
     {
-        private Task MonsterOperation(GameMap map)
+        private Task MonsterOperation(MapInstance map)
         {
             if (!map.ConnectedTamers.Any())
                 return Task.CompletedTask;
@@ -76,12 +76,12 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             return Task.CompletedTask;
         }
 
-        private void BossOperation(GameMap map, MobConfigModel mob, List<long> nearTamers, List<long> farTamers)
+        private void BossOperation(MapInstance map, MobConfigModel mob, List<long> nearTamers, List<long> farTamers)
         {
             throw new NotImplementedException();
         }
 
-        private void MobsOperation(GameMap map, MobConfigModel mob)
+        private void MobsOperation(MapInstance map, MobConfigModel mob)
         {
             switch (mob.CurrentAction)
             {
@@ -260,7 +260,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             }
         }
 
-        private void ItemsReward(GameMap map, MobConfigModel mob)
+        private void ItemsReward(MapInstance map, MobConfigModel mob)
         {
             if (mob.DropReward == null)
                 return;
@@ -271,7 +271,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
                 DropReward(map, mob);
         }
 
-        private void ExperienceReward(GameMap map, MobConfigModel mob)
+        private void ExperienceReward(MapInstance map, MobConfigModel mob)
         {
             if (mob.ExpReward == null)
                 return;
@@ -384,7 +384,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             return baseExperience; // Se não houver redutor, a experiência base é mantida
         }
 
-        private void DropReward(GameMap map, MobConfigModel mob)
+        private void DropReward(MapInstance map, MobConfigModel mob)
         {
             var targetClient = map.Clients.FirstOrDefault(x => x.TamerId == mob.TargetTamer?.Id);
             if (targetClient == null)
@@ -459,7 +459,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             }
         }
 
-        private void RaidReward(GameMap map, MobConfigModel mob)
+        private void RaidReward(MapInstance map, MobConfigModel mob)
         {
             Console.WriteLine($"Raid {mob.Name} rankers {mob.RaidDamage.Count}.");
             var writer = new PacketWriter();

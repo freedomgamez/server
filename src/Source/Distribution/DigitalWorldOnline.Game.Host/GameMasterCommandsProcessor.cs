@@ -38,6 +38,7 @@ namespace DigitalWorldOnline.Game
         private readonly MapServer _mapServer;
         private readonly DungeonsServer _dungeonServer;
         private readonly PvpServer _pvpServer;
+        private readonly MapRegistry _registry;
         private readonly ILogger _logger;
         private readonly ISender _sender;
         private readonly IConfiguration _configuration;
@@ -50,6 +51,7 @@ namespace DigitalWorldOnline.Game
             MapServer mapServer,
             DungeonsServer dungeonsServer,
             PvpServer pvpServer,
+            MapRegistry registry,
             ILogger logger,
             ISender sender,
             IConfiguration configuration)
@@ -61,6 +63,7 @@ namespace DigitalWorldOnline.Game
             _mapServer = mapServer;
             _dungeonServer = dungeonsServer;
             _pvpServer = pvpServer;
+            _registry = registry;
             _logger = logger;
             _sender = sender;
             _configuration = configuration;
@@ -323,6 +326,27 @@ namespace DigitalWorldOnline.Game
                         packet.WriteByte(0);
 
                         _mapServer.BroadcastGlobal(packet.Serialize());
+                    }
+                    break;
+
+                case "channels":
+                    {
+                        // Phase E Step 7 — live channel snapshot for the
+                        // requesting GM's current map (default-map type only).
+                        var mapId = client.Tamer.Location.MapId;
+                        var summary = new System.Text.StringBuilder();
+                        summary.Append($"Map {mapId} channels: ");
+                        bool any = false;
+                        foreach (var c in _registry.GetChannelsOf(
+                            Commons.Enums.MapTypeEnum.Default, mapId))
+                        {
+                            if (any) summary.Append(", ");
+                            summary.Append($"ch{c.Channel}={c.Clients.Count}");
+                            if (c.CloseMap) summary.Append("(closing)");
+                            any = true;
+                        }
+                        if (!any) summary.Append("(none registered for default type)");
+                        client.Send(new SystemMessagePacket(summary.ToString()));
                     }
                     break;
 

@@ -1,6 +1,7 @@
 ﻿using DigitalWorldOnline.Application.Separar.Queries;
 using DigitalWorldOnline.Application.GameAssets.Queries;
 using DigitalWorldOnline.Commons.Entities;
+using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Models;
 using DigitalWorldOnline.Commons.Models.Character;
 using DigitalWorldOnline.Commons.Models.Config;
@@ -20,6 +21,15 @@ namespace DigitalWorldOnline.GameHost.EventsServer
         /// <param name="cancellationToken">Control token for the operation</param>
         public async Task StartAsync(CancellationToken cancellationToken)
         {
+            // Phase D: wire the driver's pre-init hook to our event-specific
+            // mob seeding so the driver can run the standard tick body.
+            _driver.OnFirstTick = async (map, token) =>
+            {
+                var mobs = await GetMapMobs(map, token);
+                map.RequestMobsUpdate(mobs);
+                map.UpdateMobsList();
+            };
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
@@ -44,7 +54,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
         /// Gets the map latest mobs.
         /// </summary>
         /// <returns>The mobs collection</returns>
-        private async Task<List<MobConfigModel>> GetMapMobs(GameMap map, CancellationToken token)
+        private async Task<List<MobConfigModel>> GetMapMobs(MapInstance map, CancellationToken token)
         {
             var mobList = new List<MobConfigModel>();
 
@@ -78,29 +88,17 @@ namespace DigitalWorldOnline.GameHost.EventsServer
         /// Runs the target map operations.
         /// </summary>
         /// <param name="map">the target map</param>
-        private async Task RunMap(GameMap map, CancellationToken token)
-        {
-            try
-            {
-                if (!map.Initialized)
-                {
-                    var mobs = await GetMapMobs(map, token);
-                    map.RequestMobsUpdate(mobs);
-                    map.UpdateMobsList();
-                }
-
-                map.Initialize();
-                map.ManageHandlers();
-
-                await TamerOperation(map);
-                await MonsterOperation(map);
-                await DropsOperation(map);
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Unexpected error at event map running: {ex.Message} {ex.StackTrace}.");
-            }
-        }
+        // Phase D: per-tick body delegates to EventMapDriver.RunMap.  The
+        // driver's OnFirstTick hook (wired in StartAsync) runs the event-only
+        // pre-init mob seeding before MapInstance.Initialize.
+        private Task RunMap(MapInstance map, CancellationToken token)
+            => _driver.RunMap(
+                map,
+                TamerOperation,
+                MonsterOperation,
+                DropsOperation,
+                _logger,
+                token);
 
         /// <summary>
         /// Adds a new gameclient to the target map.
@@ -118,6 +116,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             {
                 client.Tamer.MobsInView.Clear();
                 map.AddClient(client);
+                _registry.OnTamerEnter(map, client.TamerId);
                 client.Tamer.Revive();
             }
             else
@@ -136,6 +135,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
 
                     client.Tamer.MobsInView.Clear();
                     map.AddClient(client);
+                    _registry.OnTamerEnter(map, client.TamerId);
                     client.Tamer.Revive();
                 });
             }
@@ -149,163 +149,56 @@ namespace DigitalWorldOnline.GameHost.EventsServer
         /// <param name="client">The gameclient to be removed.</param>
         public void RemoveClient(GameClient client)
         {
-            var map = Maps.FirstOrDefault(x => x.MapId == client.Tamer.Location.MapId);
+            var map = _registry.FindByTamer(client.TamerId)
+                ?? _registry.GetChannelsOf(MapTypeEnum.Event, client.Tamer.Location.MapId).FirstOrDefault();
 
             map?.RemoveClient(client);
+            _registry.OnTamerLeave(client.TamerId);
         }
 
+        // Phase D: broadcast / lookup helpers delegate to MapDriver.
         public void BroadcastForChannel(byte channel, byte[] packet)
-        {
-            var maps = Maps.Where(x => x.Channel == channel).ToList();
-
-            maps?.ForEach(map => { map.BroadcastForMap(packet); });
-        }
+            => _driver.BroadcastForChannel(_registry, channel, packet);
 
         public void BroadcastGlobal(byte[] packet)
-        {
-            var maps = Maps.Where(x => x.Clients.Any()).ToList();
-
-            maps?.ForEach(map => { map.BroadcastForMap(packet); });
-        }
+            => _driver.BroadcastGlobal(_registry, packet);
 
         public void BroadcastForMap(short mapId, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
-
-            map?.BroadcastForMap(packet);
-        }
+            => _driver.BroadcastForMap(_registry, mapId, packet);
 
         public void BroadcastForUniqueTamer(long tamerId, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.Clients.Any(x => x.TamerId == tamerId));
-
-            map?.BroadcastForUniqueTamer(tamerId, packet);
-        }
+            => _driver.BroadcastForUniqueTamer(_registry, tamerId, packet);
 
         public void BroadcastForTargetTamers(List<long> targetTamers, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.Clients.Any(x => targetTamers.Contains(x.TamerId)));
-
-            map?.BroadcastForTargetTamers(targetTamers, packet);
-        }
+            => _driver.BroadcastForTargetTamers(_registry, targetTamers, packet);
 
         public void BroadcastForTargetTamers(long sourceId, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.Clients.Any(x => x.TamerId == sourceId));
-
-            map?.BroadcastForTargetTamers(map.TamersView[sourceId], packet);
-        }
+            => _driver.BroadcastForTargetTamers(_registry, sourceId, packet);
 
         public void BroadcastForTamerViewsAndSelf(long sourceId, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.Clients.Any(x => x.TamerId == sourceId));
+            => _driver.BroadcastForTamerViewsAndSelf(_registry, sourceId, packet);
 
-            map?.BroadcastForTamerViewsAndSelf(sourceId, packet);
-        }
-
-        public void AddMapDrop(Drop drop)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == drop.Location.MapId);
-
-            map?.DropsToAdd.Add(drop);
-        }
-
-        public void RemoveDrop(Drop drop)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == drop.Location.MapId);
-
-            map?.RemoveMapDrop(drop);
-        }
-
-        public Drop? GetDrop(short mapId, int dropHandler)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
-
-            return map?.GetDrop(dropHandler);
-        }
+        public void AddMapDrop(Drop drop) => _driver.AddMapDrop(_registry, drop);
+        public void RemoveDrop(Drop drop) => _driver.RemoveDrop(_registry, drop);
+        public Drop? GetDrop(short mapId, int dropHandler) => _driver.GetDrop(_registry, mapId, dropHandler);
 
         //Mobs
         public bool MobsAttacking(short mapId, long tamerId)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
-
-            return map?.MobsAttacking(tamerId) ?? false;
-        }
+            => _driver.MobsAttacking(_registry, mapId, tamerId);
 
         public List<CharacterModel> GetNearbyTamers(short mapId, long tamerId)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
-
-            return map?.NearbyTamers(tamerId);
-        }
+            => _driver.GetNearbyTamers(_registry, mapId, tamerId);
 
         public MobConfigModel? GetMobByHandler(short mapId, int handler)
-        {
-            return Maps.
-                FirstOrDefault(x => x.MapId == mapId)?
-                .Mobs
-                .FirstOrDefault(x => x.GeneralHandler == handler);
-        }
+            => _driver.GetMobByHandler(_registry, mapId, handler);
 
         public List<MobConfigModel> GetMobsNearbyPartner(Location location, int range)
-        {
-            var targetMap = Maps.FirstOrDefault(x => x.MapId == location.MapId);
-            if (targetMap == null)
-                return default;
-
-            var originX = location.X;
-            var originY = location.Y;
-
-            return GetTargetMobs(targetMap.Mobs.Where(x => x.Alive).ToList(), originX, originY, range).DistinctBy(x => x.Id).ToList();
-        }
+            => _driver.GetMobsNearbyPartner(_registry, location, range);
 
         public List<MobConfigModel> GetMobsNearbyTargetMob(short mapId, int handler, int range)
-        {
-            var targetMap = Maps.FirstOrDefault(x => x.MapId == mapId);
-            if (targetMap == null)
-                return default;
+            => _driver.GetMobsNearbyTargetMob(_registry, mapId, handler, range);
 
-            var originMob = targetMap.Mobs.FirstOrDefault(x => x.GeneralHandler == handler);
-
-            if (originMob == null)
-                return default;
-
-            var originX = originMob.CurrentLocation.X;
-            var originY = originMob.CurrentLocation.Y;
-
-            var targetMobs = new List<MobConfigModel>();
-            targetMobs.Add(originMob);
-
-            targetMobs.AddRange(GetTargetMobs(targetMap.Mobs.Where(x => x.Alive).ToList(), originX, originY, range));
-
-            return targetMobs.DistinctBy(x => x.Id).ToList();
-        }
-
-        public static List<MobConfigModel> GetTargetMobs(List<MobConfigModel> mobs, int originX, int originY, int range)
-        {
-            var targetMobs = new List<MobConfigModel>();
-
-            foreach (var mob in mobs)
-            {
-                var mobX = mob.CurrentLocation.X;
-                var mobY = mob.CurrentLocation.Y;
-
-                var distance = CalculateDistance(originX, originY, mobX, mobY);
-
-                if (distance <= range)
-                {
-                    targetMobs.Add(mob);
-                }
-            }
-
-            return targetMobs;
-        }
-
-        private static double CalculateDistance(int x1, int y1, int x2, int y2)
-        {
-            var deltaX = x2 - x1;
-            var deltaY = y2 - y1;
-            return Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
-        }
+        // GetTargetMobs / CalculateDistance helpers retired — MapDriver computes
+        // Euclidean distance inline.  See MapDriver.EuclideanWithin.
     }
 }

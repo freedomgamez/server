@@ -59,7 +59,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                     if (party != null)
                     {
-                        var targetClients = _dungeonServer.Maps.FirstOrDefault(x => x.Clients.Any() && x.DungeonId == party.Id);
+                        var targetMap = _dungeonServer.FindMapByDungeonId(party.Id);
+                        var targetClients = targetMap?.Clients.Any() == true ? targetMap : null;
 
                         if (targetClients != null)
                         {
@@ -195,7 +196,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     }
                     else
                     {
-                        var targetClients = _dungeonServer.Maps.FirstOrDefault(x => x.Clients.Any() && x.DungeonId == client.TamerId);
+                        var soloMap = _dungeonServer.FindMapByDungeonId(client.TamerId);
+                        var targetClients = soloMap?.Clients.Any() == true ? soloMap : null;
 
                         if (targetClients == null)
                             return;

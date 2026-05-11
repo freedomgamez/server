@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Models.Map;
 using DigitalWorldOnline.Game.Managers;
 using MediatR;
@@ -21,8 +22,16 @@ namespace DigitalWorldOnline.GameHost
         private readonly ILogger _logger;
         private readonly ISender _sender;
         private readonly IMapper _mapper;
+        private readonly MapRegistry _registry;
+        private readonly DefaultMapDriver _driver;
 
-        public List<GameMap> Maps { get; set; }
+        /// <summary>
+        /// Backwards-compatibility view of <see cref="MapRegistry.GetFlatBacking"/>
+        /// scoped to <see cref="MapTypeEnum.Default"/>.  Phase B will migrate
+        /// callers off this property onto registry lookups directly; for now it
+        /// stays so the existing 77 sites keep compiling.
+        /// </summary>
+        public List<MapInstance> Maps { get; set; }
 
         public MapServer(
             PartyManager partyManager,
@@ -35,7 +44,9 @@ namespace DigitalWorldOnline.GameHost
             DailyEventService dailyEvent,    // C7
             ILogger logger,
             ISender sender,
-            IMapper mapper)
+            IMapper mapper,
+            MapRegistry registry,
+            DefaultMapDriver driver)
         {
             _partyManager = partyManager;
             _statusManager = statusManager;
@@ -48,8 +59,12 @@ namespace DigitalWorldOnline.GameHost
             _logger = logger;
             _sender = sender;
             _mapper = mapper;
+            _registry = registry;
+            _driver = driver;
 
-            Maps = new List<GameMap>();
+            // Share the registry's flat backing list so mutations through
+            // _registry.Register / Unregister are visible via Maps and vice-versa.
+            Maps = _registry.GetFlatBacking(MapTypeEnum.Default);
         }
     }
 }

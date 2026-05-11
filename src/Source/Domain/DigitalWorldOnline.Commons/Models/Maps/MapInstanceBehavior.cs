@@ -9,14 +9,22 @@ using System.Text;
 
 namespace DigitalWorldOnline.Commons.Models.Map
 {
-    public sealed partial class GameMap :ICloneable
+    public sealed partial class MapInstance : ICloneable
     {
         //TODO: externalizar
         private readonly int _startToSee = 4000;
         private readonly int _stopSeeing = 4001;
 
         public List<ConsignedShop> ConsignedShopsToRemove = new();
- 
+
+        /// <summary>
+        /// Channel Step 1 — set the channel index for this MapInstance instance.
+        /// Channel 0 is the always-on baseline; 1+ are auto-spawned by the channel
+        /// manager.  Caller is <see cref="DigitalWorldOnline.GameHost.MapServer"/>
+        /// during initial map load / auto-scale-up.
+        /// </summary>
+        public void SetChannelIdx(byte channelIdx) => Channel = channelIdx;
+
         public void Initialize()
         {
             if (Initialized)
@@ -270,9 +278,21 @@ namespace DigitalWorldOnline.Commons.Models.Map
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Phase C deprecation note: <see cref="ICloneable.Clone"/> was a shallow
+        /// <see cref="MemberwiseClone"/> that reference-shared Mobs / Drops /
+        /// Clients lists across the clone — a long-standing latent bug.  All
+        /// remaining callers build dungeon instances via the canonical
+        /// <see cref="MapInstance(MapDefinition, byte, List{MobConfigModel}, List{SummonMobModel}, List{KillSpawnConfigModel})"/>
+        /// constructor.  Method retained only to satisfy the
+        /// <see cref="ICloneable"/> contract; calling it throws.
+        /// </summary>
         public object Clone()
         {
-            return (GameMap)MemberwiseClone();
+            throw new NotSupportedException(
+                "MapInstance.Clone is no longer supported. Build a fresh instance " +
+                "via the (MapDefinition, channel, mobs, summons, killSpawns) " +
+                "constructor with per-channel runtime state.");
         }
     }
 }

@@ -50,7 +50,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var storeDist = _dmBase.Data.PersonStore.StoreDist;
             if (storeDist > 0)
             {
-                var map = _mapServer.Maps.FirstOrDefault(m => m.MapId == client.Tamer.Location.MapId);
+                var map = _mapServer.FindMapByTamer(client.TamerId);
                 if (map != null)
                 {
                     var myX = client.Tamer.Location.X;

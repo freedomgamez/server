@@ -90,6 +90,17 @@ namespace DigitalWorldOnline.Game
 
                     services.AddSingleton<EventQueueManager>();
                     
+                    // MapRegistry is the single source of truth for live MapInstance
+                    // instances across all four map-owning servers.  Must register
+                    // before the servers that inject it (Map Rework Phase A).
+                    services.AddSingleton<MapRegistry>();
+                    // Per-type lifecycle drivers (Map Rework Phase D).  Each
+                    // *Server injects its corresponding driver; the driver owns
+                    // CleanIdle + RefreshInstances strategy for that map type.
+                    services.AddSingleton<DefaultMapDriver>();
+                    services.AddSingleton<DungeonMapDriver>();
+                    services.AddSingleton<PvpMapDriver>();
+                    services.AddSingleton<EventMapDriver>();
                     services.AddSingleton<MapServer>();
                     services.AddSingleton<PvpServer>();
                     //services.AddSingleton<EventServer>();

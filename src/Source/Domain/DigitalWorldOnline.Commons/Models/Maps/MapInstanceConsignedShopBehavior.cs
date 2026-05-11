@@ -2,7 +2,7 @@
 
 namespace DigitalWorldOnline.Commons.Models.Map
 {
-    public sealed partial class GameMap
+    public sealed partial class MapInstance
     {
         public bool ViewingConsignedShop(long consignedShopKey, long tamerTarget)
         {

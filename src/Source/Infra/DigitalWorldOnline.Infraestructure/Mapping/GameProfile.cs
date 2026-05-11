@@ -17,8 +17,10 @@ namespace DigitalWorldOnline.Infraestructure.Mapping
             CreateMap<ConsignedShop, ConsignedShopDTO>()
                 .ReverseMap();
 
-            CreateMap<GameMap, MapConfigDTO>()
-                .ReverseMap();
+            // Phase C: MapInstance no longer derives from MapConfigModel, so it
+            // can't AutoMap directly to/from MapConfigDTO.  Callers go through
+            // MapConfigModel (via ConfigProfile.cs) and then construct MapInstance
+            // manually with a fresh per-channel runtime.
 
             CreateMap<GuildModel, GuildDTO>()
                 .ReverseMap();

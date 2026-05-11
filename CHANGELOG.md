@@ -2,6 +2,67 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Map layer rework + retail-like channel system (Phases A–E)
+
+End-to-end rework of the Game.Host map layer to support multi-channel-per-map with auto-scaling, plus the supporting infrastructure underneath it.  The pre-rework code had four parallel `*Server` classes copy-pasting the same `List<GameMap>` scan-and-iterate skeleton, no central index, and a stubbed channel system that hardcoded `{0:30}` for every request.  Six phases land here; channels (E) are the user-visible payoff.
+
+### Phase A — `MapRegistry` (singleton, O(1) indexes)
+
+- **`Distribution/Game.Host/MapServers/MapRegistry.cs`** *(new)* — central facade over the four server-owned `List<MapInstance>`s.  Indexed by `(MapTypeEnum, MapId, ChannelIdx)` triple, with secondary tamer-id → instance and dungeon-id → instance caches that the per-frame combat / packet hot path reads in O(1).  Each `*Server.Maps` property now points at the same `List<MapInstance>` reference the registry holds in its `_flat[type]` map, so legacy code that still iterates `Maps` keeps working through the migration.
+- **`Distribution/Game.Host/Program.cs`** — `services.AddSingleton<MapRegistry>()` registered before the four servers that inject it.
+- **All four `*Server` ctors** — inject `MapRegistry` and initialise `Maps = _registry.GetFlatBacking(MapTypeEnum.X)` instead of `new List<MapInstance>()`.  Their `SearchNewMaps` / `CleanMaps` now go through `_registry.Register` / `_registry.Unregister` so the dictionary index stays current.
+- **Phase A wiring (separate fix-up pass)** — `OnTamerEnter` / `OnTamerLeave` were dead code at first land; the four `AddClient` / `RemoveClient` sites now actually call them so the tamer→map cache is hot from entry instead of cold-path-scanning on first lookup.
+
+### Phase B — every `Maps.FirstOrDefault(predicate)` site migrated
+
+Pre-rework, Game.Host had **77 lookup sites** doing flat `List<GameMap>.FirstOrDefault(...)` — every one of them O(n) and almost all channel-blind (would silently pick channel 0 of any multi-channel map).  Migration patterns:
+
+- Tamer-bound lookups: `Maps.FirstOrDefault(x => x.Clients.Exists(c => c.TamerId == X))` → `_registry.FindByTamer(X)` (O(1), channel-correct).
+- MapId-only lookups: `Maps.FirstOrDefault(x => x.MapId == X)` → `_registry.GetChannelsOf(type, mapId).FirstOrDefault()` with a `// TODO Phase E` marker for the channel ambiguity.
+- Dungeon-keyed lookups: `Maps.FirstOrDefault(x => x.DungeonId == Y)` → `_registry.FindByDungeonId(Y)` (or `_dungeonServer.FindMapByDungeonId(Y)` from packet processors).
+- Cross-server `_xxServer.Maps.FirstOrDefault(...)` calls in packet processors swept the same way; new public passthroughs (`MapServer.FindMapByTamer`, `DungeonsServer.FindMapByDungeonId`, `DungeonsServer.FindMapByTamer`) cover that surface so processors don't need to inject the registry directly.
+
+Files touched in this wave: `MapServerBaseOperation`, `DungeonsServerBaseOperation`, `DungeonsServerTamerOperation`, `EventServerBaseOperation`, `PvpServerBaseOperation`, plus `PartyRequestResponsePacketProcessor`, `DungeonArenaNextStagePacketProcessor`, `ItemConsumePacketProcessor`.
+
+### Phase C — real `GameMap` → `MapDefinition` + `MapInstance` split
+
+Renamed `GameMap` to `MapInstance` everywhere (6 partial source files renamed, ~250 refs across 36 `.cs` files).  Dropped the `GameMap : MapConfigModel` inheritance; `MapInstance` now has a real `MapDefinition` reference for catalog data (`Id` / `MapId` / `Name` / `Type` / `DungeonIdTemplate`) and owns its own per-instance `DungeonId` + `Mobs` + `SummonMobs` + `KillSpawns` runtime lists.  Catalog passthrough properties (`Id`, `MapId`, `Name`, `Type`) keep the 250+ call sites compiling without churn.
+
+- **`Domain/.../Models/Maps/MapDefinition.cs`** — promoted from a 5-field record to a real catalog class built from a `MapConfigModel`.
+- **`Domain/.../Models/Maps/MapInstance.cs`** *(was `GameMap.cs`)* — canonical ctor is `(MapDefinition, byte channelIdx, List<MobConfigModel>, List<SummonMobModel>, List<KillSpawnConfigModel>)`.  Legacy 3-arg ctor retained for `EventServer.AddContent`'s in-process synthetic maps.
+- **`MapInstance.Clone()` retired** — the old `MemberwiseClone()` shallow-copy reference-shared `Mobs`/`Drops`/`SummonMobs` lists across dungeon clones (a real latent bug — every party of the same dungeon was looking at the same live mob list).  Method now throws.  The two callers (in `DungeonsServerBaseOperation.SearchNewMaps`) were rewritten to use the canonical ctor with fresh per-instance lists.
+- **`Infra/.../Mapping/GameProfile.cs`** — removed `CreateMap<GameMap, MapConfigDTO>().ReverseMap()`; drivers now do `mapper.Map<MapConfigModel>(dto)` once to harvest the catalog, then per-channel maps for fresh mob/summon/killspawn lists, and construct `MapInstance` manually.
+
+### Phase D — `MapDriver` strategy + operation-method hoist
+
+Four near-identical copies of `BroadcastForChannel/Global/Map/UniqueTamer/TargetTamers/TamerViewsAndSelf`, `AddMapDrop/RemoveDrop/GetDrop`, `MobsAttacking`, `GetNearbyTamers`, `GetMobByHandler`, `GetMobsNearbyPartner/TargetMob`, plus the per-tick `RunMap` body — one in each `*ServerBaseOperation.cs`.  All collapsed:
+
+- **`Distribution/Game.Host/MapServers/MapDriver.cs`** *(new abstract base)* — owns the lifecycle (`RefreshInstances` + `CleanIdle`), every shared broadcast / drop / lookup helper (parameterised by `MapTypeEnum Type`), and a `virtual RunMap` taking the `tamerOp`/`monsterOp`/`dropsOp` as `Func<MapInstance,Task>` callbacks (the operation bodies themselves remain type-specific and stay on the `*Server` classes).
+- **`DefaultMapDriver` / `DungeonMapDriver` / `PvpMapDriver` / `EventMapDriver`** *(new concrete drivers)* — each owns the type's `RefreshInstances` shape (1:1 vs N-channels vs per-party-on-demand vs never-from-DB).  `PvpMapDriver` overrides `RunMap` to skip monster/drops (Pvp arenas don't have NPC mobs).  `EventMapDriver` overrides with the sequential variant + an `OnFirstTick` hook that `EventServer.StartAsync` wires to its mob-seed routine.
+- **The four `*ServerBaseOperation.cs`** — each broadcast/lookup method is now a one-line `=> _driver.X(_registry, ...)` passthrough.  Per-tick `RunMap` is similarly a one-line delegation that hands the three operation methods as callbacks.  Bespoke per-server methods (`MapServer.BroadcastForSelectedMaps`, `Dungeons.BroadcastForMap(..., tamerId)`, `Pvp.EnemiesAttacking/GetEnemyByHandler`) stay where they are — those are genuinely type-specific.  `GetTargetMobs` / `CalculateDistance` static helpers retired in favour of `MapDriver.EuclideanWithin`.
+
+### Phase E — retail-like channel system on the new architecture
+
+- **`DefaultMapDriver`** — spawns `BaselineChannelsPerMap = 3` channels per default map at boot.  Each `RefreshInstances` tick auto-scales: if every live channel of a map is ≥ `ScaleUpThreshold = 200` players, spawn a new channel at `HighestChannelIdx + 1` (capped at `MaxChannelsPerMap = 32`, matching v487 client's `nLimit::Channel = 32` in `common_vs2019/pLimit.h`).  Idle non-baseline channels (Channel ≥ 3, population 0, sibling has < `ScaleUpThreshold - 30` headroom) get `MarkForClose()`'d for the next `CleanIdle` pass to unregister.
+- **`MapInstance.MarkForClose()`** — new primitive; `CloseMap` is now `_markedForClose || idle ≥ 2 h`.
+- **`MapRegistry.PickLowestPopulated` + `HighestChannelIdx`** — new helpers.
+- **`MapServerBaseOperation.PickChannelFor(client)`** *(new)* — replaces the `Maps.FirstOrDefault(...)` channel pick.  Honours `client.Tamer.Channel` first when it points at a live initialised channel of the target map (so a relog after a switch lands on the same channel), falls back to lowest-populated, then to any-initialised.
+- **`InitialInformationPacketProcessor`** — removed the hardcoded `character.SetCurrentChannel(0)` reset that was overriding every fresh login back to channel 0 (and quietly defeating channel switches).
+- **`ChannelsPacketProcessor`** — replies to `pSvr::ChannelInfo` with the live per-channel population from the registry (was hardcoded `{0:30}`).
+- **`SwitchChannelPacketProcessor`** *(real implementation, was a no-op stub)* — handles `pGame::ChangeChannel = 1050` (`u4 targetChannelIdx`).  Validates target exists + has headroom + is initialised + tamer isn't already mid-load; rejects via an `AvailableChannelsPacket` with the target slot forced to `0xFF` (the client's `ChannelContents::ChangeFail` consumes that).  Accepts via `RemoveClient` from the old channel, `SetCurrentChannel(target)` + `UpdateCharacterChannelCommand` persist, state→Loading, then `MapSwapPacket` (same IP/port + same MapId + current pos).
+- **`PostLoadCompletePacketProcessor`** *(new — `pSvr::Change = 1703` handler)* — the missing piece without which any `MapSwapPacket` flow leaves the client stuck on the loading screen.  After the client finishes loading (`LoadingContents::_DataLoadComplete` → `cCliGame::SendChangeServer`), it sends `pSvr::Change`.  Server bounces the same `pSvr::Change` back via `ConnectGameServerPacket`; the client's `RecvChangeServer` sets `net::cmd = Cmd::ConnectGameServer` and the next idle tick calls `net::start()` which closes the old socket and opens a fresh one to the (same) IP/port.  The new socket runs the normal AccessCode handshake, `InitialInformationPacketProcessor` reloads the character (with persisted `Channel = target`), and `MapServer.AddClient → PickChannelFor` drops the player on the new channel.  This also makes the existing GM `/summon`, `/warp`, and die-respawn flows work — same bug, same wall, never wired before.
+- **`GameMasterCommandsProcessor`** — `channels` GM command lists per-map channel populations (`Map 105 channels: ch0=N, ch1=N, ch2=N`, marks teardown candidates).
+
+### Packet-ID corrections
+
+- **`GameServerPacketEnum.Channels`** — corrected from `1712` to `1713`.  A prior session miscounted `Begin = nScope::Svr (1700)` as a marker rather than the first slot, ending up two off (1712 is actually `pSvr::TryLogin`).  Both the enum and `AvailableChannelsPacket.PacketNumber` (which hardcoded 1712 inline) now agree on **1713** (`pSvr::ChannelInfo`).  This is the regression that bricked the channel UI between sessions — client logged `unknown protocol(1712)` and the in-game flow timed out into winsock error 10009.  See `reference_packet_id_counting_rule.md` in the team memory for the recount.
+- **`GameServerPacketEnum.PostLoadComplete = 1703`** — new entry covering `pSvr::Change` from the client direction.  Comment block explains the bidirectional semantic (server→client = "reconnect", client→server = "I'm done loading").
+
+### Removed / renamed files
+
+- `Models/Maps/GameMap.cs` → `MapInstance.cs` (+ 5 behaviour partials renamed similarly)
+- `Packets/MapServer/ChannelSwitchConfirmPacket.cs` deleted (dead — was the placeholder for the no-op stub processor).
+
 ## Monster.bin — every `eEFFECT_TYPE` value now drives real gameplay (Phases 3–7 + Gaps + Steps 9–10)
 
 The 27045-only `SkillTarget` block — which previously routed every mob skill regardless of bin data — is gone.  21 distinct `eEFFECT_TYPE` values now dispatch through dedicated handlers, AoE radii are bin-driven from `MonsterSkillTerms.s_nRange`, BERSERK reflects damage back to attackers, GROWTH stacks DP/AP factors against snapshotted baselines, mob-summoning skills queue spawns through the existing `AddSummonMobs` broadcast path, and unrecognised SkillTypes log a once-per-id warning so future bin values surface visibly.

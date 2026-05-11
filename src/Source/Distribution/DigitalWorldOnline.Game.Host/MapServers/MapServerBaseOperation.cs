@@ -24,40 +24,23 @@ namespace DigitalWorldOnline.GameHost
         private readonly int _stopSeeing = 6001;
       
         /// <summary>
-        /// Cleans unused running maps.
+        /// Cleans unused running maps.  Lifecycle hoisted into <see cref="DefaultMapDriver"/>.
         /// </summary>
         public Task CleanMaps()
         {
-            var mapsToRemove = new List<GameMap>();
-            mapsToRemove.AddRange(Maps.Where(x => x.CloseMap));
-
-            foreach (var map in mapsToRemove)
-            {
-                _logger.Debug($"Removing inactive instance for {map.Type} map {map.Id} - {map.Name}...");
-                Maps.Remove(map);
-            }
-
+            _driver.CleanIdle(_registry, _logger);
             return Task.CompletedTask;
         }
 
         /// <summary>
-        /// Search for new maps to instance.
+        /// Periodic poll — every 10 s the driver loads any new map definitions
+        /// from DB (Phase F: bin) and spawns 3 channel instances per map.
         /// </summary>
         public async Task SearchNewMaps(CancellationToken cancellationToken)
         {
             if (DateTime.Now > _lastMapsSearch)
             {
-                var mapsToLoad = _mapper.Map<List<GameMap>>(await _sender.Send(new GameMapsConfigQuery(MapTypeEnum.Default), cancellationToken));
-
-                foreach (var newMap in mapsToLoad)
-                {
-                    if (!Maps.Any(x => x.Id == newMap.Id))
-                    {
-                        _logger.Debug($"Initializing new instance for {newMap.Type} map {newMap.Id} - {newMap.Name}...");
-                        Maps.Add(newMap);
-                    }
-                }
-
+                await _driver.RefreshInstances(_sender, _mapper, _registry, _logger, cancellationToken);
                 _lastMapsSearch = DateTime.Now.AddSeconds(10);
             }
         }
@@ -145,40 +128,20 @@ namespace DigitalWorldOnline.GameHost
         }
 
         /// <summary>
-        /// Runs the target map operations.
+        /// Per-tick body — delegates to <see cref="MapDriver.RunMap"/>.  The
+        /// driver decides parallelism + tail-delay shape; the operation methods
+        /// (<see cref="TamerOperation"/> / <see cref="MonsterOperation"/> /
+        /// <see cref="DropsOperation"/>) are passed in as callbacks because
+        /// their bodies are MapServer-specific.
         /// </summary>
-        /// <param name="map">the target map</param>
-        private async Task RunMap(GameMap map)
-        {
-            try
-            {
-                map.Initialize();
-                map.ManageHandlers();
-
-                var stopwatch = new Stopwatch();
-                stopwatch.Start();
-
-                var tasks = new List<Task>
-                {
-                    Task.Run(() => TamerOperation(map)),
-                    Task.Run(() => MonsterOperation(map)),
-                    Task.Run(() => DropsOperation(map))
-                };
-
-                await Task.WhenAll(tasks);
-
-                stopwatch.Stop();
-                var totalTime = stopwatch.Elapsed.TotalMilliseconds;
-                if (totalTime >= 1000)
-                    Console.WriteLine($"RunMap ({map.MapId}): {totalTime}.");
-
-                await Task.Delay(500);
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Unexpected error at map running: {ex.Message} {ex.StackTrace}.");
-            }
-        }
+        private Task RunMap(MapInstance map)
+            => _driver.RunMap(
+                map,
+                m => { TamerOperation(m); return Task.CompletedTask; },
+                m => { MonsterOperation(m); return Task.CompletedTask; },
+                m => { DropsOperation(m); return Task.CompletedTask; },
+                _logger,
+                CancellationToken.None);
 
         /// <summary>
         /// Adds a new gameclient to the target map.
@@ -186,9 +149,7 @@ namespace DigitalWorldOnline.GameHost
         /// <param name="client">The game client to be added.</param>
         public Task AddClient(GameClient client)
         {
-            var map = Maps
-                    .FirstOrDefault(x => x.Initialized &&
-                                         x.MapId == client.Tamer.Location.MapId);
+            var map = PickChannelFor(client);
 
             client.SetLoading();
 
@@ -196,6 +157,7 @@ namespace DigitalWorldOnline.GameHost
             {
                 client.Tamer.MobsInView.Clear();
                 map.AddClient(client);
+                _registry.OnTamerEnter(map, client.TamerId);
                 client.Tamer.Revive();
             }
             else
@@ -207,9 +169,7 @@ namespace DigitalWorldOnline.GameHost
                     while (map == null)
                     {
                         Thread.Sleep(2000);
-                        map = Maps
-                            .FirstOrDefault(x => x.Initialized &&
-                                                 x.MapId == client.Tamer.Location.MapId);
+                        map = PickChannelFor(client);
 
                         _logger.Warning($"Waiting map {client.Tamer.Location.MapId} initialization.");
 
@@ -229,6 +189,7 @@ namespace DigitalWorldOnline.GameHost
                     {
                         client.Tamer.MobsInView.Clear();
                         map.AddClient(client);
+                        _registry.OnTamerEnter(map, client.TamerId);
                         client.Tamer.Revive();
                     }
                 });
@@ -243,43 +204,77 @@ namespace DigitalWorldOnline.GameHost
         /// <param name="client">The gameclient to be removed.</param>
         public void RemoveClient(GameClient client)
         {
-            var map = Maps.FirstOrDefault(x => x.MapId == client.Tamer.Location.MapId);
-
+            // Tamer-bound — registry's tamer-id cache is O(1) and channel-correct.
+            // (Old flat scan on MapId picked an arbitrary channel of that map.)
+            var map = _registry.FindByTamer(client.TamerId);
             map?.RemoveClient(client);
+            _registry.OnTamerLeave(client.TamerId);
         }
 
-        public void BroadcastForChannel(byte channel, byte[] packet)
+        /// <summary>
+        /// Public O(1) tamer→map lookup for callers outside this class (packet
+        /// processors etc.).  Wraps <see cref="MapRegistry.FindByTamer"/> so
+        /// callers don't need to inject the registry directly.
+        /// </summary>
+        public MapInstance? FindMapByTamer(long tamerId) => _registry.FindByTamer(tamerId);
+
+        /// <summary>
+        /// Phase E Step 6 — pick which channel a freshly-entering client should
+        /// land on.  Priority:
+        /// <list type="number">
+        ///   <item>If <c>client.Tamer.Channel</c> points at a live, initialized
+        ///   channel of this map (e.g. just came back from a channel switch or
+        ///   relog), honour it.</item>
+        ///   <item>Otherwise pick the lowest-populated channel via the
+        ///   registry.</item>
+        ///   <item>Fallback: any initialized channel of the map (matches old
+        ///   behaviour when the registry hasn't seen the map yet).</item>
+        /// </list>
+        /// Returns <c>null</c> if no channel for the map exists yet — the
+        /// caller's spin loop will wait for SearchNewMaps to register one.
+        /// </summary>
+        private MapInstance? PickChannelFor(GameClient client)
         {
-            var maps = Maps.Where(x => x.Channel == channel).ToList();
+            var mapId = client.Tamer.Location.MapId;
+            var preferred = _registry.GetByMapAndChannel(MapTypeEnum.Default, mapId, client.Tamer.Channel);
+            if (preferred != null && preferred.Initialized)
+                return preferred;
 
-            maps?.ForEach(map => { map.BroadcastForMap(packet); });
+            var balanced = _registry.PickLowestPopulated(MapTypeEnum.Default, mapId);
+            if (balanced != null)
+            {
+                // Persist the chosen channel so later lookups (and a relog)
+                // hit the same one.  Fire-and-forget — no need to await.
+                client.Tamer.SetCurrentChannel(balanced.Channel);
+                return balanced;
+            }
+
+            return Maps.FirstOrDefault(x => x.Initialized && x.MapId == mapId);
         }
+
+        // Phase D: broadcast / lookup helpers all delegate to the driver, which
+        // does the same registry-keyed work for every server type.
+        public void BroadcastForChannel(byte channel, byte[] packet)
+            => _driver.BroadcastForChannel(_registry, channel, packet);
 
         public void BroadcastGlobal(byte[] packet)
-        {
-            var maps = Maps.Where(x => x.Clients.Any()).ToList();
+            => _driver.BroadcastGlobal(_registry, packet);
 
-            maps?.ForEach(map => { map.BroadcastForMap(packet); });
-        }
         public void BroadcastForSelectedMaps(byte[] packet, List<int> mapIds)
         {
-            var maps = Maps.Where(map => map.Clients.Any() && mapIds.Contains(map.MapId)).ToList();
-
-            maps?.ForEach(map => { map.BroadcastForMap(packet); });
+            // MapServer-only — the other servers don't have multi-map selective
+            // broadcast.  Iterate the default-type channels and filter to the
+            // requested MapId set.
+            foreach (var map in _registry.GetByType(MapTypeEnum.Default))
+                if (map.Clients.Any() && mapIds.Contains(map.MapId))
+                    map.BroadcastForMap(packet);
         }
+
         public void BroadcastForMap(short mapId, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
-
-            map?.BroadcastForMap(packet);
-        }
+            => _driver.BroadcastForMap(_registry, mapId, packet);
 
         public void BroadcastForUniqueTamer(long tamerId, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(x => x.TamerId == tamerId));
-
-            map?.BroadcastForUniqueTamer(tamerId, packet);
-        }
+            => _driver.BroadcastForUniqueTamer(_registry, tamerId, packet);
 
         public GameClient? FindClientByTamerId(long tamerId)
         {
@@ -296,119 +291,51 @@ namespace DigitalWorldOnline.GameHost
         }
 
         public void BroadcastForTargetTamers(List<long> targetTamers, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(x => targetTamers.Contains(x.TamerId)));
-
-            map?.BroadcastForTargetTamers(targetTamers, packet);
-        }
+            => _driver.BroadcastForTargetTamers(_registry, targetTamers, packet);
 
         public void BroadcastForTargetTamers(long sourceId, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(x => x.TamerId == sourceId));
-
-            map?.BroadcastForTargetTamers(map.TamersView[sourceId], packet);
-        }
+            => _driver.BroadcastForTargetTamers(_registry, sourceId, packet);
 
         public void BroadcastForTamerViewsAndSelf(long sourceId, byte[] packet)
-        {
-            var map = Maps.FirstOrDefault(x => x.Clients.Exists(x => x.TamerId == sourceId));
+            => _driver.BroadcastForTamerViewsAndSelf(_registry, sourceId, packet);
 
-            map?.BroadcastForTamerViewsAndSelf(sourceId, packet);
-        }
-
-        public void AddMapDrop(Drop drop)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == drop.Location.MapId);
-
-            map?.DropsToAdd.Add(drop);
-        }
-
-        public void RemoveDrop(Drop drop)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == drop.Location.MapId);
-
-            map?.RemoveMapDrop(drop);
-        }
-
-        public Drop? GetDrop(short mapId, int dropHandler)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
-
-            return map?.GetDrop(dropHandler);
-        }
+        public void AddMapDrop(Drop drop) => _driver.AddMapDrop(_registry, drop);
+        public void RemoveDrop(Drop drop) => _driver.RemoveDrop(_registry, drop);
+        public Drop? GetDrop(short mapId, int dropHandler) => _driver.GetDrop(_registry, mapId, dropHandler);
 
         //Mobs
         public bool MobsAttacking(short mapId, long tamerId)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
+            => _driver.MobsAttacking(_registry, mapId, tamerId);
 
-            return map?.MobsAttacking(tamerId) ?? false;
-        }
         public bool MobsAttacking(short mapId, long tamerId, bool Summon)
         {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
-
+            // MapServer-only summon overload — distinct semantic (summon mobs not
+            // catalog mobs); kept here.
+            var map = _registry.FindByTamer(tamerId);
             return map?.MobsAttacking(tamerId, true) ?? false;
         }
+
         public List<CharacterModel> GetNearbyTamers(short mapId, long tamerId)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
+            => _driver.GetNearbyTamers(_registry, mapId, tamerId);
 
-            return map?.NearbyTamers(tamerId);
-        }
         public void AddSummonMobs(short mapId, SummonMobModel summon)
-        {
-            var map = Maps.FirstOrDefault(x => x.MapId == mapId);
+            => _driver.AddSummonMobs(_registry, mapId, summon);
 
-            map?.AddMob(summon);
-        }
         public MobConfigModel? GetMobByHandler(short mapId, int handler)
-        {
-            return Maps.
-                FirstOrDefault(x => x.MapId == mapId)?
-                .Mobs
-                .FirstOrDefault(x => x.GeneralHandler == handler);
-        }
+            => _driver.GetMobByHandler(_registry, mapId, handler);
+
         public SummonMobModel? GetMobByHandler(short mapId, int handler, bool summon)
         {
-            return Maps.
-                FirstOrDefault(x => x.MapId == mapId)?
-                .SummonMobs
-                .FirstOrDefault(x => x.GeneralHandler == handler);
+            // MapServer-only summon overload — keep here.
+            var map = _registry.GetChannelsOf(MapTypeEnum.Default, mapId).FirstOrDefault();
+            return map?.SummonMobs.FirstOrDefault(x => x.GeneralHandler == handler);
         }
+
         public List<MobConfigModel> GetMobsNearbyPartner(Location location, int range)
-        {
-            var targetMap = Maps.FirstOrDefault(x => x.MapId == location.MapId);
-            if (targetMap == null)
-                return new List<MobConfigModel>();
-
-            var originX = location.X;
-            var originY = location.Y;
-
-            return GetTargetMobs(targetMap.Mobs.Where(x => x.Alive).ToList(), originX, originY, range).DistinctBy(x => x.Id).ToList();
-        }
+            => _driver.GetMobsNearbyPartner(_registry, location, range);
 
         public List<MobConfigModel> GetMobsNearbyTargetMob(short mapId, int handler, int range)
-        {
-            var targetMap = Maps.FirstOrDefault(x => x.MapId == mapId);
-            if (targetMap == null)
-                return new List<MobConfigModel>();
-
-            var originMob = targetMap.Mobs.FirstOrDefault(x => x.GeneralHandler == handler);
-
-            if (originMob == null)
-                return new List<MobConfigModel>();
-
-            var originX = originMob.CurrentLocation.X;
-            var originY = originMob.CurrentLocation.Y;
-
-            var targetMobs = new List<MobConfigModel>();
-            targetMobs.Add(originMob);
-
-            targetMobs.AddRange(GetTargetMobs(targetMap.Mobs.Where(x => x.Alive).ToList(), originX, originY, range));
-
-            return targetMobs.DistinctBy(x => x.Id).ToList();
-        }
+            => _driver.GetMobsNearbyTargetMob(_registry, mapId, handler, range);
 
         public static List<MobConfigModel> GetTargetMobs(List<MobConfigModel> mobs, int originX, int originY, int range)
         {
@@ -433,7 +360,8 @@ namespace DigitalWorldOnline.GameHost
 
         public List<SummonMobModel> GetMobsNearbyPartner(Location location, int range, bool Summon)
         {
-            var targetMap = Maps.FirstOrDefault(x => x.MapId == location.MapId);
+            // TODO Phase E: needs requesting partner's channel.
+            var targetMap = _registry.GetChannelsOf(MapTypeEnum.Default, location.MapId).FirstOrDefault();
             if (targetMap == null)
                 return new List<SummonMobModel>();
 
@@ -445,7 +373,8 @@ namespace DigitalWorldOnline.GameHost
 
         public List<SummonMobModel> GetMobsNearbyTargetMob(short mapId, int handler, int range, bool Summon)
         {
-            var targetMap = Maps.FirstOrDefault(x => x.MapId == mapId);
+            // TODO Phase E: channel ambiguity.
+            var targetMap = _registry.GetChannelsOf(MapTypeEnum.Default, mapId).FirstOrDefault();
             if (targetMap == null)
                 return new List<SummonMobModel>();
 

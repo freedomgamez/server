@@ -6,7 +6,7 @@ namespace DigitalWorldOnline.GameHost
 {
     public sealed partial class DungeonsServer
     {
-        private void DropsOperation(GameMap map)
+        private void DropsOperation(MapInstance map)
         {
             if (!map.ConnectedTamers.Any())
                 return;
@@ -47,7 +47,7 @@ namespace DigitalWorldOnline.GameHost
                 Console.WriteLine($"DropsOperation ({map.Drops.Count}): {totalTime}.");
         }
 
-        private void ShowAndHideDrop(GameMap map, Drop drop, List<long> nearTamers, List<long> farTamers)
+        private void ShowAndHideDrop(MapInstance map, Drop drop, List<long> nearTamers, List<long> farTamers)
         {
             foreach (var targetTamer in nearTamers)
             {
@@ -72,7 +72,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void CheckLostDrop(GameMap map, Drop drop)
+        private void CheckLostDrop(MapInstance map, Drop drop)
         {
             if (!drop.Lost && !drop.Thrown && drop.NoOwner)
             {
@@ -91,7 +91,7 @@ namespace DigitalWorldOnline.GameHost
             }
         }
 
-        private void CheckExpiredDrop(GameMap map, Drop drop)
+        private void CheckExpiredDrop(MapInstance map, Drop drop)
         {
             if (drop.Expired && !map.DropsToRemove.Any(x => x.Id == drop.Id))
             {

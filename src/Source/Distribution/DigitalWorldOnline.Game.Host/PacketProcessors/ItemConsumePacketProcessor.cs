@@ -768,7 +768,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                     if (client.DungeonMap)
                     {
-                        var map = _dungeonServer.Maps.FirstOrDefault(x => x.Clients.Exists(x => x.TamerId == client.TamerId));
+                        var map = _dungeonServer.FindMapByTamer(client.TamerId);
 
                         var mobId = map.SummonMobs.Count + 1;
 
@@ -793,7 +793,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     }
                     else
                     {
-                        var map = _mapServer.Maps.FirstOrDefault(x => x.MapId == client.Tamer.Location.MapId);
+                        var map = _mapServer.FindMapByTamer(client.TamerId);
                         var mobId = map.SummonMobs.Count + 1;
 
                         mob.SetId(mobId);

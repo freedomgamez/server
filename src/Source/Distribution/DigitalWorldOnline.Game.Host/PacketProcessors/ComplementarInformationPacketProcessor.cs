@@ -257,7 +257,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             if (!client.DungeonMap)
             {
-                var map = _mapServer.Maps.FirstOrDefault(x => x.MapId == client.Tamer.Location.MapId);
+                var map = _mapServer.FindMapByTamer(client.TamerId);
 
                 if (map != null)
                 {
@@ -335,7 +335,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
         }
 
-        public void NotifyTamerKillSpawnEnteringMap(GameClient client, GameMap map)
+        public void NotifyTamerKillSpawnEnteringMap(GameClient client, MapInstance map)
         {
             foreach (var sourceKillSpawn in map.KillSpawns)
             {
@@ -357,7 +357,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         }
 
-        private void NotifyMapChat(GameClient client, GameMap map, KillSpawnConfigModel sourceKillSpawn)
+        private void NotifyMapChat(GameClient client, MapInstance map, KillSpawnConfigModel sourceKillSpawn)
         {
             foreach (var targetMob in sourceKillSpawn.TargetMobs)
             {

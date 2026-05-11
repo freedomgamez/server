@@ -52,7 +52,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                         if (leaderClient.DungeonMap)
                         {
-                            var targetMap = _dungeonServer.Maps.FirstOrDefault(x => x.DungeonId == leaderClient.TamerId);
+                            var targetMap = _dungeonServer.FindMapByDungeonId(leaderClient.TamerId);
 
                             if (targetMap != null)
                             {
@@ -127,7 +127,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                 if (leaderClient.DungeonMap)
                 {
-                    var targetMap = _dungeonServer.Maps.FirstOrDefault(x => x.DungeonId == leaderClient.TamerId);
+                    var targetMap = _dungeonServer.FindMapByDungeonId(leaderClient.TamerId);
 
                     if (targetMap != null)
                     {

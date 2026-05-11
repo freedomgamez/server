@@ -297,9 +297,28 @@ namespace DigitalWorldOnline.Commons.Enums.PacketProcessor
         TradeInventorylock = 1532,
 
         /// <summary>
-        /// Confirm the channel switch.
+        /// Client → server: request to switch the current map's channel.
+        /// Maps to <c>pGame::ChangeChannel</c> = <c>nScope::Game (1000) + 50</c>.
+        /// Payload: <c>u4 nChannelIDX</c>.  (Previously misnamed
+        /// <c>ChannelSwitchConfirm = 1703</c>, which is actually <c>pSvr::GoBackGate</c>.)
         /// </summary>
-        ChannelSwitchConfirm = 1703,
+        ChangeChannel = 1050,
+
+        /// <summary>
+        /// Client → server: fired by <c>cCliGame::SendChangeServer</c>
+        /// (<c>pSvr::Change = 1703</c>) when <c>LoadingContents::_DataLoadComplete</c>
+        /// finishes a portal/MapSwap-triggered load.  No payload.
+        ///
+        /// Server response: re-add the tamer to the (possibly new-channel) map
+        /// instance and resend <c>InitialInfoPacket</c> so the client's freshly
+        /// reset state gets re-initialised.  See
+        /// <c>PostLoadCompletePacketProcessor</c>.
+        ///
+        /// Without this handler, any flow that pushes a <c>MapSwapPacket</c>
+        /// (channel switch, GM /summon /warp, die-respawn) leaves the client
+        /// stuck on the loading screen because the server silently drops 1703.
+        /// </summary>
+        PostLoadComplete = 1703,
 
         /// <summary>
         /// Loads the base information about the tamer and digimons.
@@ -312,7 +331,15 @@ namespace DigitalWorldOnline.Commons.Enums.PacketProcessor
         WarpGate = 1709,
 
         /// <summary>
-        /// Loads the available channels
+        /// Bidirectional: client → server request for the channel list (no payload),
+        /// server → client reply carrying <c>(u1 idx, u1 load) × N + u1 0xFF</c>.
+        /// Maps to <c>pSvr::ChannelInfo</c> in <c>common_vs2019/pServer.h</c>.
+        /// Counting from <c>Begin = nScope::Svr (1700)</c>: ClusterList=1701,
+        /// SelectCluster=1702, Change=1703, GoBackGate=1704, GoBackAccount=1705,
+        /// AccessCode=1706, KillGate=1707, KillSession=1708, SelectPortal=1709,
+        /// SelectPortalFailure=1710, LocalPortal=1711, TryLogin=1712,
+        /// <b>ChannelInfo=1713</b>.  A prior "fix" miscounted and used 1712 —
+        /// reverted here.
         /// </summary>
         Channels = 1713,
 

@@ -14,7 +14,7 @@ using System.Diagnostics;
 
 namespace DigitalWorldOnline.Commons.Models.Map
 {
-    public sealed partial class GameMap
+    public sealed partial class MapInstance
     {
         private List<MobConfigModel> _mobsToDestroy = new List<MobConfigModel>();
 

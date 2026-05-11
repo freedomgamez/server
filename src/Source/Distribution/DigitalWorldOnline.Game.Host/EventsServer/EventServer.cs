@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Models.Config;
 using DigitalWorldOnline.Commons.Models.Map;
 using DigitalWorldOnline.Game.Managers;
@@ -20,8 +21,10 @@ namespace DigitalWorldOnline.GameHost.EventsServer
         private readonly ILogger _logger;
         private readonly ISender _sender;
         private readonly IMapper _mapper;
+        private readonly MapRegistry _registry;
+        private readonly EventMapDriver _driver;
 
-        public List<GameMap> Maps { get; set; }
+        public List<MapInstance> Maps { get; set; }
 
         public int MobAmount { get; }
         public int DropAmount { get; }
@@ -37,7 +40,9 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             FatigueService fatigueService,   // FATIGUE_HOOK
             ILogger logger,
             ISender sender,
-            IMapper mapper)
+            IMapper mapper,
+            MapRegistry registry,
+            EventMapDriver driver)
         {
             _eventQueueManager = eventQueueManager;
             _statusManager = statusManager;
@@ -48,6 +53,10 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             _logger = logger;
             _sender = sender;
             _mapper = mapper;
+            _registry = registry;
+            _driver = driver;
+
+            Maps = _registry.GetFlatBacking(MapTypeEnum.Event);
 
             MobAmount = 100;
             DropAmount = 50;
@@ -78,10 +87,10 @@ namespace DigitalWorldOnline.GameHost.EventsServer
 
         private void AddContent()
         {
-            Maps = new List<GameMap>()
+            Maps = new List<MapInstance>()
             {
-                new GameMap(9001, AddMobs(), AddDrops()),
-                new GameMap(9002, AddBoss(), new List<Drop>())
+                new MapInstance(9001, AddMobs(), AddDrops()),
+                new MapInstance(9002, AddBoss(), new List<Drop>())
             };
         }
 
