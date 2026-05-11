@@ -331,6 +331,60 @@ namespace DigitalWorldOnline.Commons.Models.Map
             return Random.Shared.Next(skill.MinValue, skill.MaxValue + 1);
         }
 
+        /// <summary>
+        /// ASSEMBLE / DISPERSE / GatheringExt / DisperseExt — pick N marks, damage each,
+        /// broadcast a single <see cref="MobAreaSkillPacket"/> carrying the mark list
+        /// and per-target hit entries.  <paramref name="divideDamage"/> splits the rolled
+        /// total across the mark count (ASSEMBLE) vs applying it to each (DISPERSE).
+        /// </summary>
+        private void ApplyMarkedTargetSkill(MobConfigModel mob, MonsterSkillInfoAssetModel skill, bool divideDamage)
+        {
+            // Mark count comes from bin's TargetCount, clamped to [TargetMin, TargetMax].
+            int desired = skill.TargetCount > 0 ? skill.TargetCount : 1;
+            if (skill.TargetMin > 0 && desired < skill.TargetMin) desired = skill.TargetMin;
+            if (skill.TargetMax > 0 && desired > skill.TargetMax) desired = skill.TargetMax;
+            if (desired <= 0) return;
+
+            // Pick eligible targets (in-range alive partners).
+            var alive = new List<DigimonModel>();
+            var copy = new List<CharacterModel>(mob.TargetTamers);
+            foreach (var t in copy)
+            {
+                var partner = t.Partner;
+                if (partner == null || !partner.Alive) continue;
+                var d = UtilitiesFunctions.CalculateDistance(
+                    mob.CurrentLocation.X, partner.Location.X,
+                    mob.CurrentLocation.Y, partner.Location.Y);
+                if (d <= 1900) alive.Add(partner);
+            }
+            if (alive.Count == 0) return;
+
+            // Take up to `desired` marks — first N by aggro list order.
+            int markCount = Math.Min(desired, alive.Count);
+            var marks = alive.GetRange(0, markCount);
+
+            int total = RollMonsterSkillValue(skill);
+            int perTarget = divideDamage && markCount > 0 ? total / markCount : total;
+            if (perTarget < 0) perTarget = 0;
+
+            var markHandlers = new List<int>(markCount);
+            var hits = new List<MobAreaSkillPacket.Hit>(markCount);
+            foreach (var partner in marks)
+            {
+                var newHp = partner.ReceiveDamage(perTarget);
+                var hpRate = (byte)((long)partner.CurrentHp * 255L / Math.Max(1, partner.HP));
+                bool died = newHp <= 0;
+                if (died) partner.Die();
+                markHandlers.Add(partner.GeneralHandler);
+                hits.Add(new MobAreaSkillPacket.Hit(partner.GeneralHandler, perTarget, hpRate, died));
+            }
+
+            BroadcastForTargetTamers(mob.TamersViewing,
+                new MonsterSkillVisualPacket(mob.GeneralHandler, skill.SkillId).Serialize());
+            BroadcastForTargetTamers(mob.TamersViewing,
+                new MobAreaSkillPacket(mob.GeneralHandler, skill.SkillId, markHandlers, hits).Serialize());
+        }
+
         // eEFFECT_TYPE values mirrored from CsMonsterSkill (Monster.h:126-159) +
         // newer values from common_vs2019/cSkillSource.h:194-230 (eMon_SkillEffect).
         // Server uses bare integer constants per the no-enums-on-server convention —
@@ -339,8 +393,12 @@ namespace DigitalWorldOnline.Commons.Models.Map
         private const int EffectHpValIncrease       = 3;    // self-heal: flat roll
         private const int EffectHpValDecrease       = 4;    // damage in AoE around self
         private const int EffectDsValDecrease       = 10;   // DS drain
+        private const int EffectAssemble            = 16;   // mark N targets, divide damage among them
+        private const int EffectDisperse            = 17;   // mark N targets, full damage to each
         private const int EffectBuffOccure          = 21;   // apply buff (self or target)
         private const int EffectSingleStackDebuff   = 22;   // single-target damage + debuff stack
+        private const int EffectGatheringExt        = 25;   // ASSEMBLE with projectile VFX (server-identical)
+        private const int EffectDisperseExt         = 26;   // DISPERSE with projectile VFX (server-identical)
         private const int EffectExterminate         = 30;   // map-wide damage (no distance gate)
         private const int EffectLegacyHardcoded     = 27045;// pre-bin-migration DB synonym for case 4
 
@@ -472,6 +530,25 @@ namespace DigitalWorldOnline.Commons.Models.Map
                         BroadcastForTargetTamers(mob.TamersViewing,
                             new AddBuffPacket(target.GeneralHandler, debuffId, targetSkill.SkillId, 1, debuffMs).Serialize());
                     }
+                    break;
+                }
+
+                // ─── ASSEMBLE / DISPERSE / GatheringExt / DisperseExt ─────
+                // (eEFFECT_TYPE = 16, 17, 25, 26).  All four share the same client
+                // wire format (cCliGameSkill.cpp:251 unifies them in one switch case).
+                // Server-side they differ only in damage math:
+                //   ASSEMBLE / GatheringExt  → total damage divided among marks
+                //   DISPERSE / DisperseExt   → full roll applied to EACH mark
+                // 25 vs 16 (and 26 vs 17) differ only in client VFX (projectile vs instant) —
+                // that's driven by s_nValocity/s_nAccel which the bin carries and the client
+                // reads locally; server treatment is identical.
+                case EffectAssemble:
+                case EffectDisperse:
+                case EffectGatheringExt:
+                case EffectDisperseExt:
+                {
+                    ApplyMarkedTargetSkill(mob, targetSkill,
+                        divideDamage: targetSkill.SkillType == EffectAssemble || targetSkill.SkillType == EffectGatheringExt);
                     break;
                 }
 
