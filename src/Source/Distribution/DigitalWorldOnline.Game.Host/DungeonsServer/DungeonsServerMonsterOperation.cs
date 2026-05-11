@@ -363,8 +363,11 @@ namespace DigitalWorldOnline.GameHost
                             break;
                         }
 
+                        // Pick a skill off cooldown AND satisfying its s_nUse_Terms gate (Step 7).
                         var skillList = _assets.MonsterSkillInfo
-                            .Where(x => x.Type == mob.Type && !mob.IsSkillOnCooldown(x.SkillId))
+                            .Where(x => x.Type == mob.Type
+                                     && !mob.IsSkillOnCooldown(x.SkillId)
+                                     && MonsterSkillRotation.TermMatches(x, mob, mob.Target))
                             .ToList();
 
                         if (!skillList.Any())

@@ -408,9 +408,13 @@ namespace DigitalWorldOnline.GameHost
                             break;
                         }
 
-                        // No active cast — pick a skill that's off its OWN cooldown (not the global).
+                        // No active cast — pick a skill that's
+                        //   (a) off its OWN cooldown (per-skill, not global), AND
+                        //   (b) eligible per its s_nUse_Terms gate (Step 7 rotation filter).
                         var skillList = _assets.MonsterSkillInfo
-                            .Where(x => x.Type == mob.Type && !mob.IsSkillOnCooldown(x.SkillId))
+                            .Where(x => x.Type == mob.Type
+                                     && !mob.IsSkillOnCooldown(x.SkillId)
+                                     && MonsterSkillRotation.TermMatches(x, mob, mob.Target))
                             .ToList();
 
                         if (!skillList.Any())
