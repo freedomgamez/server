@@ -159,6 +159,25 @@ namespace DigitalWorldOnline.Commons.Enums.PacketProcessor
         /// </summary>
         TamerSummon = 1114,
 
+        /// <summary>
+        /// pSkill::AddSkillChip (1118) — server→client only.  Sent after a successful
+        /// chip-consume registers a memory skill on the partner's evolution.  Not a
+        /// receive-side packet, but kept here so logs disambiguate it from "no processor".
+        /// </summary>
+        MemorySkillAdd = 1118,
+
+        /// <summary>
+        /// pSkill::RemoveSkillChip — client requests deletion of a memory skill from
+        /// the partner's current evolution.  Payload: u4 SkillCode.
+        /// </summary>
+        MemorySkillRemove = 1119,
+
+        /// <summary>
+        /// pSkill::UseSkillChip — client requests cast of an attached memory skill.
+        /// Payload: u4 DigimonUID, u1 EvoStep, u4 SkillCode, u4 TargetUID.
+        /// </summary>
+        MemorySkillUse = 1120,
+
 
         /// <summary>
         /// Tamer Change Character Name

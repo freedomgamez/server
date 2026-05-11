@@ -124,7 +124,35 @@ namespace DigitalWorldOnline.Commons.DTOs.Assets
         /// The explicit type of the casted skill.
         /// </summary>
         public int Type { get; set; }
-        
+
+        /// <summary>
+        /// CsSkill::sINFO::s_nAttType — drives <c>IsActive()</c>/<c>IsPasive()</c> on the
+        /// client (<c>Skill.h:88-89</c>). Active skills are usable from the hotbar
+        /// (<c>AttType != 0 &amp;&amp; AttType != 4</c>); passive skills (<c>AttType == 4</c>)
+        /// are always-on buffs and must NOT be cast as attack packets.
+        /// </summary>
+        public int AttType { get; set; }
+
+        /// <summary>
+        /// CsSkill::sINFO::s_nMemorySkill — 0 = inherent skill (cannot be deleted),
+        /// 1-3 = memory skill (cash-shop, deletable; ranks low/mid/high).  See
+        /// <c>Skill.h:76</c> Korean comment.
+        /// </summary>
+        public byte MemorySkill { get; set; }
+
+        /// <summary>
+        /// CsSkill::sINFO::s_nSkillGroup — used by client to detect overlap between
+        /// memory skills (you can't equip two memory skills of the same group on the same
+        /// digimon).  Server enforces the same on grant.
+        /// </summary>
+        public int SkillGroup { get; set; }
+
+        /// <summary>
+        /// CsSkill::sINFO::s_nSkillRank — for memory skills only: 1 = low, 2 = mid,
+        /// 3 = high (matching the rank tiers in <see cref="MemorySkill"/>).
+        /// </summary>
+        public int SkillRank { get; set; }
+
         /// <summary>
         /// The description about the skill.
         /// </summary>

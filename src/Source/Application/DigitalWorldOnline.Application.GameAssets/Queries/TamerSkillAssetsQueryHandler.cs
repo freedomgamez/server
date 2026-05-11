@@ -57,7 +57,10 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
                     Id = ts.Index,
                     SkillId = ts.Index,
                     SkillCode = ts.SkillCode,
-                    Duration = durationSeconds
+                    Duration = durationSeconds,
+                    UseState = (byte)ts.UseState,
+                    UseAreaCheck = (byte)ts.UseAreaCheck,
+                    Available = (byte)ts.Available
                 });
             }
             return Task.FromResult(list);

@@ -125,12 +125,51 @@ namespace DigitalWorldOnline.Commons.Models.Asset
         /// The explicit type of the casted skill.
         /// </summary>
         public int Type { get; private set; }
-        
+
+        /// <summary>
+        /// CsSkill::sINFO::s_nAttType — see <see cref="IsActive"/> / <see cref="IsPassive"/>.
+        /// </summary>
+        public int AttType { get; private set; }
+
+        /// <summary>
+        /// True for skills the client treats as active (castable from the hotbar).  Mirrors
+        /// v487 client's <c>CsSkill::IsActive()</c> in <c>LibProj/CsFileTable/Skill.h:88</c>.
+        /// </summary>
+        public bool IsActive => AttType != 0 && AttType != 4;
+
+        /// <summary>
+        /// True for passive (always-on) skills.  Mirrors <c>CsSkill::IsPasive()</c> at
+        /// <c>Skill.h:89</c>.  Server must reject incoming cast packets for passive skills —
+        /// passive effects fire from buff state, never from a player-triggered packet.
+        /// </summary>
+        public bool IsPassive => AttType == 4;
+
+        /// <summary>
+        /// CsSkill::sINFO::s_nMemorySkill — 0 = inherent, 1-3 = memory skill rank tier.
+        /// </summary>
+        public byte MemorySkill { get; private set; }
+
+        /// <summary>
+        /// True if this skill is a deletable memory skill (cash-shop acquired).  Inherent
+        /// per-evolution skills (slot 0..3 from Digimon_List.bin) have <c>MemorySkill == 0</c>.
+        /// </summary>
+        public bool IsMemorySkill => MemorySkill > 0;
+
+        /// <summary>
+        /// CsSkill::sINFO::s_nSkillGroup — overlap key.  A digimon can only equip one
+        /// memory skill per group at a time.
+        /// </summary>
+        public int SkillGroup { get; private set; }
+
+        /// <summary>
+        /// CsSkill::sINFO::s_nSkillRank — 1=low, 2=mid, 3=high (memory skills only).
+        /// </summary>
+        public int SkillRank { get; private set; }
 
         /// <summary>
         /// The description about the skill.
         /// </summary>
         public string Description { get; private set; }
-       
+
     }
 }

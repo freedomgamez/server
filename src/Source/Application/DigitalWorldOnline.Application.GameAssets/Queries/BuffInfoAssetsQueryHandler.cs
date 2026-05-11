@@ -25,6 +25,11 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
             var list = new List<BuffAssetDTO>(_loader.Data.ById.Count);
             foreach (var rec in _loader.Data.ById.Values)
             {
+                // Existing semantics: drop deleted records from the asset list.  Memory-
+                // skill cast queries the raw bin loader directly so it can still pick
+                // up the regionally-disabled buffs (skillCode 9000xxx with s_bDelete=1).
+                if (rec.IsDeleted) continue;
+
                 list.Add(new BuffAssetDTO
                 {
                     BuffId = rec.Id,

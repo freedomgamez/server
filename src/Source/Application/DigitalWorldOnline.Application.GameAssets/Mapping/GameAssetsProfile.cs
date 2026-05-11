@@ -56,6 +56,9 @@ namespace DigitalWorldOnline.Application.GameAssets.Mapping
             CreateMap<MonsterSkillAssetModel, MonsterSkillAssetDTO>()
               .ReverseMap();
 
+            CreateMap<TamerSkillAreaCheckAssetModel, TamerSkillAreaCheckAssetDTO>()
+                .ReverseMap();
+
             CreateMap<MonsterSkillInfoAssetModel, MonsterSkillInfoAssetDTO>()
                 .ReverseMap();
 

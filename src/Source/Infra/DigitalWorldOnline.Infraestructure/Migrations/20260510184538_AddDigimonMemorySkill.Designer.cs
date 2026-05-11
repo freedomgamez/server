@@ -3,6 +3,7 @@ using System;
 using DigitalWorldOnline.Infraestructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace DigitalWorldOnline.Infraestructure.Migrations
 {
     [DbContext(typeof(DatabaseContext))]
-    partial class DatabaseContextModelSnapshot : ModelSnapshot
+    [Migration("20260510184538_AddDigimonMemorySkill")]
+    partial class AddDigimonMemorySkill
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3144,7 +3147,7 @@ namespace DigitalWorldOnline.Infraestructure.Migrations
                         new
                         {
                             Id = 1L,
-                            CreatedAt = new DateTime(2026, 5, 10, 14, 35, 9, 166, DateTimeKind.Local).AddTicks(3455),
+                            CreatedAt = new DateTime(2026, 5, 10, 13, 45, 38, 167, DateTimeKind.Local).AddTicks(3903),
                             Hash = "pMgM+NOH0Z+RwR9F1iFVOOwKrW1iDaifx4jWDnH1Dbo="
                         });
                 });
@@ -4495,11 +4498,6 @@ namespace DigitalWorldOnline.Infraestructure.Migrations
                         .HasColumnType("datetime(6)")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
 
-                    b.Property<DateTime>("CooldownEndsAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime(6)")
-                        .HasDefaultValueSql("'1970-01-01 00:00:00.000000'");
-
                     b.Property<byte>("CurrentLevel")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint unsigned")
@@ -4877,7 +4875,7 @@ namespace DigitalWorldOnline.Infraestructure.Migrations
                         {
                             Id = 1L,
                             Active = true,
-                            CreatedAt = new DateTime(2026, 5, 10, 14, 35, 9, 170, DateTimeKind.Local).AddTicks(791),
+                            CreatedAt = new DateTime(2026, 5, 10, 13, 45, 38, 170, DateTimeKind.Local).AddTicks(9707),
                             Interval = 1,
                             Name = "Daily Quests",
                             NextRunTime = new DateTime(2026, 5, 11, 0, 0, 0, 0, DateTimeKind.Local),

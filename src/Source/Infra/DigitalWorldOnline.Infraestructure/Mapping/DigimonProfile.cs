@@ -26,6 +26,9 @@ namespace DigitalWorldOnline.Infraestructure.Mapping
             CreateMap<DigimonEvolutionSkillModel, DigimonEvolutionSkillDTO>()
                 .ReverseMap();
 
+            CreateMap<DigimonMemorySkillModel, DigimonMemorySkillDTO>()
+                .ReverseMap();
+
             CreateMap<DigimonBuffListModel, DigimonBuffListDTO>()
                 .ReverseMap();
 

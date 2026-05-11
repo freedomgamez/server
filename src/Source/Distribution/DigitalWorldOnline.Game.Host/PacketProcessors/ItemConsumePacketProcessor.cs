@@ -486,8 +486,150 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             {
                 await DskillExpansion(client, itemSlot, targetItem);
             }
+            else if (targetItem.ItemInfo.Type == 67 ||   // DigimonSkillChipATK
+                     targetItem.ItemInfo.Type == 68 ||   // DigimonSkillChipDEF
+                     targetItem.ItemInfo.Type == 69)     // DigimonSkillChipAST
+            {
+                await MemorySkillRegister(client, itemSlot, targetItem);
+            }
             else
                 client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type));
+        }
+
+        /// <summary>
+        /// Register a memory-skill chip onto the partner's currently-active evolution.
+        /// Triggered by ItemConsume (pItem::Use, 3901) when the chip item's Type_L is
+        /// 67/68/69 (ATK/DEF/AST chips).  Mirrors the v487 client's <c>SkillMemoryUse</c>
+        /// validation (cDataMng::SkillMemoryUse): per-evolution skill cap, duplicate-skill
+        /// check, same-memory-type check.  On success persists the row via
+        /// <see cref="AddMemorySkillCommand"/>, consumes the chip, and broadcasts
+        /// <see cref="MemorySkillAddPacket"/> (pSkill::AddSkillChip, 1118) so the client
+        /// adds the skill to its UI and plays the attach effect.
+        /// </summary>
+        private async Task MemorySkillRegister(GameClient client, short itemSlot, ItemModel chipItem)
+        {
+            if (client.Partner == null)
+            {
+                client.Send(new ItemConsumeFailPacket(itemSlot, chipItem.ItemInfo.Type));
+                return;
+            }
+
+            var evolution = client.Partner.Evolutions.FirstOrDefault(x => x.Type == client.Partner.CurrentType);
+            if (evolution == null)
+            {
+                _logger.Warning(
+                    "Memory-skill register: tamer {TamerId} has no evolution row matching CurrentType={Type}.",
+                    client.TamerId, client.Partner.CurrentType);
+                client.Send(new ItemConsumeFailPacket(itemSlot, chipItem.ItemInfo.Type));
+                return;
+            }
+
+            // The chip's SkillCode field is the CsSkill::s_dwID it grants.
+            int skillId = (int)chipItem.ItemInfo.SkillCode;
+            if (skillId <= 0)
+            {
+                _logger.Warning(
+                    "Memory-skill register: chip item {ItemId} has no SkillCode in Asset_ItemInfo.",
+                    chipItem.ItemId);
+                client.Send(new ItemConsumeFailPacket(itemSlot, chipItem.ItemInfo.Type));
+                return;
+            }
+
+            var skillInfo = _assets.SkillInfo.FirstOrDefault(x => x.SkillId == skillId);
+            if (skillInfo == null || !skillInfo.IsMemorySkill)
+            {
+                _logger.Warning(
+                    "Memory-skill register: chip {ItemId} → skill {SkillId} but bin says it's not a memory skill.",
+                    chipItem.ItemId, skillId);
+                client.Send(new ItemConsumeFailPacket(itemSlot, chipItem.ItemInfo.Type));
+                client.Send(new SystemMessagePacket($"Skill {skillId} is not a memory skill."));
+                return;
+            }
+
+            // Duplicate: same exact SkillId already attached to this evolution.
+            if (evolution.MemorySkills.Any(x => x.SkillId == skillId))
+            {
+                _logger.Verbose(
+                    "Memory-skill register: tamer {TamerId} already has skill {SkillId} on evolution {EvoType}.",
+                    client.TamerId, skillId, evolution.Type);
+                client.Send(new ItemConsumeFailPacket(itemSlot, chipItem.ItemInfo.Type));
+                client.Send(new SystemMessagePacket($"This memory skill is already learned."));
+                return;
+            }
+
+            // Same memory-type slot already occupied (one ATK, one DEF, one AST per evo).
+            // The bin's s_nMemorySkill maps 1=ATK / 2=DEF / 3=AST.  Chip Type_L matches:
+            //   67 → ATK (1), 68 → DEF (2), 69 → AST (3).
+            int chipMemoryType = chipItem.ItemInfo.Type - 66;  // 67→1, 68→2, 69→3
+            foreach (var existing in evolution.MemorySkills)
+            {
+                var existingInfo = _assets.SkillInfo.FirstOrDefault(x => x.SkillId == existing.SkillId);
+                if (existingInfo != null && existingInfo.MemorySkill == chipMemoryType)
+                {
+                    _logger.Verbose(
+                        "Memory-skill register: tamer {TamerId} already has a {MemType}-type memory skill on evolution {EvoType}.",
+                        client.TamerId, chipMemoryType, evolution.Type);
+                    client.Send(new ItemConsumeFailPacket(itemSlot, chipItem.ItemInfo.Type));
+                    client.Send(new SystemMessagePacket($"You already have a memory skill of this type."));
+                    return;
+                }
+            }
+
+            // Cap: v487 client constant is nLimit::MAX_ItemSkillDigimon = 2 (NOT 3).
+            // Verified from pCountry.h:82 — only 2 memory-skill slots per evolution despite
+            // the three chip categories (ATK/DEF/AST), so the duplicate-memory-type check
+            // above is what stops a player from stacking same-type chips.
+            const int MaxMemorySkillsPerEvolution = 2;
+            if (evolution.MemorySkills.Count >= MaxMemorySkillsPerEvolution)
+            {
+                _logger.Verbose(
+                    "Memory-skill register: tamer {TamerId} at cap ({Cap}) on evolution {EvoType}.",
+                    client.TamerId, MaxMemorySkillsPerEvolution, evolution.Type);
+                client.Send(new ItemConsumeFailPacket(itemSlot, chipItem.ItemInfo.Type));
+                client.Send(new SystemMessagePacket($"You can't learn any more memory skills on this digimon."));
+                return;
+            }
+
+            // Persist.  MaxLevel sourced from the bin (s_nMaxLevel) on the granted skill.
+            byte maxLevel = skillInfo.MaxLevel == 0 ? (byte)10 : (byte)skillInfo.MaxLevel;
+            var rowId = await _sender.Send(new AddMemorySkillCommand(evolution.Id, skillId, maxLevel));
+            if (rowId == 0)
+            {
+                _logger.Warning(
+                    "Memory-skill register: AddMemorySkillAsync returned 0 for tamer {TamerId} skill {SkillId} on evolution {EvoId} — probably a stale duplicate race.",
+                    client.TamerId, skillId, evolution.Id);
+                client.Send(new ItemConsumeFailPacket(itemSlot, chipItem.ItemInfo.Type));
+                return;
+            }
+
+            // Reflect in-memory so the cast handler can use the skill immediately without
+            // a relog.  CurrentLevel starts at 1 (matches Create() factory and DB default).
+            evolution.MemorySkills.Add(DigimonMemorySkillModel.Create(skillId, maxLevel));
+
+            // Cache item identity BEFORE the consume — RemoveOrReduceItem zeroes the model
+            // in-place when amount hits 0, so chipItem.ItemId is unsafe to read after.
+            int chipItemId = chipItem.ItemId;
+            int partnerHandler = client.Partner.GeneralHandler;
+
+            // Consume one chip.
+            client.Tamer.Inventory.RemoveOrReduceItem(chipItem, 1);
+            await _sender.Send(new UpdateItemCommand(chipItem));
+
+            // pSkill::AddSkillChip (1118) — third u4 is the chip's ItemId (used by the
+            // client to look up CsItem::s_cNif via g_pItemMng->GetItem(...).  Sending the
+            // category Type_L (67/68/69) here makes the client lookup return NULL and
+            // crash inside sprintf_s on s_cNif).
+            client.Send(
+                UtilitiesFunctions.GroupPackets(
+                    new MemorySkillAddPacket(partnerHandler, skillId, chipItemId).Serialize(),
+                    new ItemConsumeSuccessPacket(client.Tamer.GeneralHandler, itemSlot).Serialize(),
+                    new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
+                )
+            );
+
+            _logger.Information(
+                "Tamer {TamerId} registered memory skill {SkillId} (chip {ItemId}, type {MemType}) on evolution {EvoType}.",
+                client.TamerId, skillId, chipItemId, chipMemoryType, evolution.Type);
         }
 
         private async Task CashTamerSkills(GameClient client, short itemSlot, ItemModel targetItem)

@@ -73,6 +73,27 @@ namespace DigitalWorldOnline.Commons.Interfaces
 
         Task UpdateEvolutionAsync(DigimonEvolutionModel evolution);
 
+        /// <summary>
+        /// Detach (and remove from the DB) a single memory skill from a digimon evolution.
+        /// No-op if the (evolutionId, skillId) pair doesn't exist.  Returns true if a row
+        /// was removed.
+        /// </summary>
+        Task<bool> RemoveMemorySkillAsync(long evolutionId, int skillId);
+
+        /// <summary>
+        /// Persist a newly-acquired memory skill for a digimon evolution.  Caller is
+        /// responsible for validating ownership (cash-shop pipeline) before calling.
+        /// Returns the new row's Id, or 0 if the (evolutionId, skillId) pair already exists.
+        /// </summary>
+        Task<long> AddMemorySkillAsync(long evolutionId, int skillId, byte maxLevel);
+
+        /// <summary>
+        /// Persist the cooldown end-time of a single memory-skill row.  Called after a
+        /// successful cast in <c>MemorySkillUsePacketProcessor</c>.  No-op if the row is
+        /// missing (e.g., the skill was unequipped between cast-validate and DB write).
+        /// </summary>
+        Task UpdateMemorySkillCooldownAsync(long evolutionId, int skillId, DateTime cooldownEndsAt);
+
         Task UpdateIncubatorAsync(CharacterIncubatorModel incubator);
 
         Task UpdateCharacterMapRegionAsync(CharacterMapRegionModel mapRegion);

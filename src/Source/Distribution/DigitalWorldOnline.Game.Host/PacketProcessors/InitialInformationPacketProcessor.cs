@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.Separar.Commands.Create;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
@@ -37,6 +38,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly DungeonsServer _dungeonsServer;
 
         private readonly AssetsLoader _assets;
+        private readonly DigimonEvoBinLoader _digimonEvo;
         private readonly ILogger _logger;
         private readonly ISender _sender;
         private readonly IMapper _mapper;
@@ -48,6 +50,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             PvpServer pvpServer,
             DungeonsServer dungeonsServer,
             AssetsLoader assets,
+            DigimonEvoBinLoader digimonEvo,
             ILogger logger,
             ISender sender,
             IMapper mapper)
@@ -58,6 +61,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _pvpServer = pvpServer;
             _dungeonsServer = dungeonsServer;
             _assets = assets;
+            _digimonEvo = digimonEvo;
             _logger = logger;
             _sender = sender;
             _mapper = mapper;
@@ -258,7 +262,25 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             // Diagnostic: dump InitialInfoPacket bytes to file for offset analysis.
             {
-                var __pkt = new InitialInfoPacket(character, party);
+                // EvoSlot lookup: client's CDigimonEvolveObj::m_nEvoSlot comes from
+                // DigimonEvo.bin's "Ev0_num" column — a 1-based per-tree slot index,
+                // NOT the global nEvo:: enum value from Digimon_List.bin's s_eEvolutionType.
+                // (CDigimonEvolution.cpp:170 — pEvolveObj->m_nEvoSlot = atoi(... "Ev0_num"))
+                // We scan every tree's DigimonEvoLine list to find the form's EvoSlot;
+                // returns 0 when unmapped so the packet writer falls back to (i+1).
+                byte EvoSlotFor(int formType)
+                {
+                    foreach (var tree in _digimonEvo.Data.ByType.Values)
+                    {
+                        foreach (var line in tree.Lines)
+                        {
+                            if (line.Type == formType)
+                                return (byte)line.EvoSlot;
+                        }
+                    }
+                    return 0;
+                }
+                var __pkt = new InitialInfoPacket(character, party, EvoSlotFor);
                 var __bytes = __pkt.Serialize();
                 System.IO.File.WriteAllBytes("/tmp/initgamedata_dump.bin", __bytes);
                 _logger.Information($"Dumped InitialInfoPacket: {__bytes.Length} bytes -> /tmp/initgamedata_dump.bin");

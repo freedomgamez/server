@@ -75,13 +75,18 @@ public sealed class BuffBinLoader
             _ = r.ReadByte();                                   // pad: align to 2 for USHORT
             ushort conditionLv = r.ReadUInt16();
 
-            if (isDeleted) continue;
-
+            // Keep deleted records — many memory-skill buffs (skillCode 9000xxx) are
+            // flagged s_bDelete in v487 (regional-disable convention in original DMO).
+            // The active-only filter is now enforced at query time
+            // (BuffInfoAssetsQueryHandler), so consumers that need the full set —
+            // notably MemorySkillUsePacketProcessor — can still find them via the
+            // raw BuffBinLoader API.
             map[id] = new BuffRecord(
                 id, buffType, lifeType, timeType,
                 minLv, buffClass,
                 skillCode, digimonSkillCode,
-                conditionLv);
+                conditionLv,
+                isDeleted);
         }
 
         return new Buff(map);

@@ -814,6 +814,45 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Character
             }
         }
 
+        public async Task<bool> RemoveMemorySkillAsync(long evolutionId, int skillId)
+        {
+            var row = await _context.DigimonMemorySkill
+                .FirstOrDefaultAsync(x => x.EvolutionId == evolutionId && x.SkillId == skillId);
+            if (row == null) return false;
+            _context.DigimonMemorySkill.Remove(row);
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<long> AddMemorySkillAsync(long evolutionId, int skillId, byte maxLevel)
+        {
+            var existing = await _context.DigimonMemorySkill
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.EvolutionId == evolutionId && x.SkillId == skillId);
+            if (existing != null) return 0;
+
+            var dto = new DigimonMemorySkillDTO
+            {
+                EvolutionId = evolutionId,
+                SkillId = skillId,
+                MaxLevel = maxLevel,
+                CurrentLevel = 1,
+                AcquiredAt = DateTime.UtcNow
+            };
+            _context.DigimonMemorySkill.Add(dto);
+            await _context.SaveChangesAsync();
+            return dto.Id;
+        }
+
+        public async Task UpdateMemorySkillCooldownAsync(long evolutionId, int skillId, DateTime cooldownEndsAt)
+        {
+            var row = await _context.DigimonMemorySkill
+                .FirstOrDefaultAsync(x => x.EvolutionId == evolutionId && x.SkillId == skillId);
+            if (row == null) return;
+            row.CooldownEndsAt = cooldownEndsAt;
+            await _context.SaveChangesAsync();
+        }
+
         public async Task UpdateIncubatorAsync(CharacterIncubatorModel incubator)
         {
             var dto = await _context.CharacterIncubator

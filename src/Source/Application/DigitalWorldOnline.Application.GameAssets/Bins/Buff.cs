@@ -39,4 +39,5 @@ public sealed record BuffRecord(
     ushort BuffClass,
     uint SkillCode,
     uint DigimonSkillCode,
-    ushort ConditionLevel);
+    ushort ConditionLevel,
+    bool IsDeleted);

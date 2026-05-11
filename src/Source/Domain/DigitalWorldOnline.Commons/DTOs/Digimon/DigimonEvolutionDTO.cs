@@ -33,9 +33,15 @@
         public byte SkillMastery { get; set; }
 
         /// <summary>
-        /// Available skills for the evolution.
+        /// Available skills for the evolution (slot 0..3 inherent skills from Digimon_List.bin).
         /// </summary>
         public List<DigimonEvolutionSkillDTO> Skills { get; set; }
+
+        /// <summary>
+        /// Cash-shop-acquired memory skills attached to this evolution.  Distinct from
+        /// <see cref="Skills"/> — variable-length, identified by SkillId rather than slot.
+        /// </summary>
+        public List<DigimonMemorySkillDTO> MemorySkills { get; set; } = new();
 
         /// <summary>
         /// Reference to the owner.

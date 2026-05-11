@@ -8,6 +8,7 @@ namespace DigitalWorldOnline.Infraestructure
     {
         public DbSet<DigimonDTO> Digimon { get; set; }
         public DbSet<DigimonEvolutionDTO> DigimonEvolution { get; set; }
+        public DbSet<DigimonMemorySkillDTO> DigimonMemorySkill { get; set; }
         public DbSet<DigimonDigicloneDTO> DigimonDigiclone { get; set; }
         public DbSet<DigimonBuffListDTO> DigimonBuffList { get; set; }
         public DbSet<DigimonLocationDTO> DigimonLocation { get; set; }
@@ -19,6 +20,7 @@ namespace DigitalWorldOnline.Infraestructure
             builder.ApplyConfiguration(new DigimonDigicloneHistoryConfiguration());
             builder.ApplyConfiguration(new DigimonEvolutionConfiguration());
             builder.ApplyConfiguration(new DigimonEvolutionSkillConfiguration());
+            builder.ApplyConfiguration(new DigimonMemorySkillConfiguration());
             builder.ApplyConfiguration(new DigimonAttributeExperienceConfiguration());
             builder.ApplyConfiguration(new DigimonBuffListConfiguration());
             builder.ApplyConfiguration(new DigimonBuffConfiguration());

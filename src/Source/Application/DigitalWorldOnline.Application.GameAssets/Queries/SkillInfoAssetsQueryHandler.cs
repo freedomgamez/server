@@ -73,6 +73,10 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
                     SecondConditionCode = rec.Apply1.BuffCode,
                     ThirdConditionCode = rec.Apply2.BuffCode,
                     Type = rec.SkillType,
+                    AttType = rec.AttType,
+                    MemorySkill = (byte)Math.Min((int)rec.MemorySkill, byte.MaxValue),
+                    SkillGroup = rec.SkillGroup,
+                    SkillRank = rec.SkillRank,
                     Description = string.Empty
                 });
             }

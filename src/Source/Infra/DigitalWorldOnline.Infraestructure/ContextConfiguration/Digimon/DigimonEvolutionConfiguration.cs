@@ -45,6 +45,11 @@ namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Digimon
                 .HasMany(x => x.Skills)
                 .WithOne(x => x.Evolution)
                 .HasForeignKey(x => x.EvolutionId);
+
+            builder
+                .HasMany(x => x.MemorySkills)
+                .WithOne(x => x.Evolution)
+                .HasForeignKey(x => x.EvolutionId);
         }
     }
 }

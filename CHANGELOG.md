@@ -2,6 +2,60 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Memory skills — full `pSkill::*SkillChip` pipeline (1118–1122)
+
+Per-evolution memory-skill chips end-to-end: register (chip → skill on evolution), delete (chip off), cast (damage / buff / instant-heal), cooldown UI, persistence across relog. The v487 client already had the full chip UI and the four send packets (`AddSkillChip` 1118 / `RemoveSkillChip` 1119 / `UseSkillChip` 1120 / `ResultSkillChip` 1122); server-side support was the missing half.
+
+### New persistence: `Digimon_MemorySkill` table
+
+- Migration **`20260510184538_AddDigimonMemorySkill`** — one row per (`DigimonEvolutionId`, `SkillId`, `CurrentLevel`, `Type`). FK cascades on evolution delete. `DigimonEvolutionModel.MemorySkills` lazy-loaded with the evolution.
+- Migration **`20260510193509_AddMemorySkillCooldown`** — `CooldownEndsAt datetime(6) NULL` so a cast in-progress survives relog (initial-info packet then sends the remaining cooldown in the cash-skill block).
+- DTO + AutoMapper profile + EF configuration + repo wiring. `DigimonMemorySkillModel.Create(skillId, maxLevel)` + `StartCooldown(ms)` + `IsOnCooldown` helpers.
+
+### New MediatR commands
+
+- **`AddMemorySkillCommand`** / **`AddMemorySkillCommandHandler`** — inserts a chip row, returns generated `RowId` (0 on duplicate race, handler treats as "already learned").
+- **`RemoveMemorySkillCommand`** / **`RemoveMemorySkillCommandHandler`** — deletes by `(EvolutionId, SkillId)`. Bool result for "actually removed vs no-op".
+- **`UpdateMemorySkillCooldownCommand`** / **`UpdateMemorySkillCooldownCommandHandler`** — persists `CooldownEndsAt` for the cast's duration.
+
+### New packet processors + writers
+
+- **`MemorySkillUsePacketProcessor`** (`pSkill::UseSkillChip`, 1120) — the main cast handler. Reads `nDigimonUID + nEvoStep + nSkillCode + nTargetUID`, validates ownership and cooldown, resolves target, branches by **APPLY FORMULA** (`Apply[0].Type` mapped to `SkillCodeApplyTypeEnum`), not by `Apply.A`:
+  - Formula `1`/`2`/`10` → **damage memory skill**. Mirrors `PartnerSkillPacketProcessor`'s single-target damage flow: clamps damage to `targetMob.CurrentHP`, calls `ReceiveDamage`, then on death broadcasts `SyncConditionPacket(ConditionEnum.Die)` **first** (forces `CMonster::SetDie() → MONSTER_DIE` state via the `cCondition` route — without this the mob's HP bar drops to 0 but the entity stays rendered because the memory-skill animation pipeline doesn't feed the client's `AttackProperty` DT_Dead queue), then `KillOnSkillPacket` for the damage popup + ServerDie flag, then `targetMob.Die()`. Post-kill `StopBattle`/`SetCombatOff` cleanup like partner-skill. On non-lethal hits: `SkillHitPacket` + `MemorySkillEffectSyncPacket` (1122) for the VFX.
+  - Formula `200+`/`101+` → **buff or instant-heal**, depending on `Apply.A`. Memory chips consumed via `RemoveOrReduceItemsBySection(7000, MemoryChips)` (item 20000 standard + 19999 event treated as one pool, per the v487 chip-stack convention).
+    - **Instant heal** (`Apply.A == 1` or `47`) routes by formula again — formula 101 = flat B, 102/106 = `B% of MaxHP` (heal-item convention), 105 = `B% of CurrentHP`. Stops 9000601 ("The Hand of Healing Low": Apply.A=1, formula=106, B=15) from healing a flat 15 HP — heals 15% of max HP now.
+    - **Buff** (all other Apply.A) — queries the raw `_buffBin.Data.ById.Values` (deleted records included, see below) for the chip's `SkillCode`/`DigimonSkillCode` row, adds a `DigimonBuffModel` with **1800-second duration** (DMO 30-min memory-skill convention; the bin doesn't carry a duration), persists via `UpdateDigimonBuffListCommand`, broadcasts `AddBuffPacket` with the raw duration in seconds (NOT a Unix timestamp — `_TIME_TS` is hard-zero in v487 because `cClient::m_timets` is never written, so `_TIME_TS` returns 0 forever; the client subtracts it from `s_nBuffEndTS` to get remaining seconds, so the right wire value is the raw duration). UINT_MAX for always-on buffs.
+- **`MemorySkillRemovePacketProcessor`** (`pSkill::RemoveSkillChip`, 1119) — validates the skill is a memory skill (`bin.MemorySkill > 0`) and is owned, then dispatches `RemoveMemorySkillCommand`, removes from in-memory `evolution.MemorySkills`. No broadcast — client removes locally on send.
+- **`MemorySkillAddPacket`** (`pSkill::AddSkillChip`, 1118) — broadcast on chip-register to play the attach VFX + add to client's skill UI.
+- **`MemorySkillEffectSyncPacket`** (`pSkill::ResultSkillChip`, 1122) — drives the on-target VFX (heal-particle, buff-particle) via the client's `RecvMemorySkill_EffectSync` switch on `s_Apply[0].s_nA`.
+- **`MemorySkillUseSuccessPacket`** (`pSkill::ChipCoolTime`, 1121) — sent to the caster only after every cast. Starts the cooldown swirl on the skill icon AND decrements the memory-chip stack visually on the client (`DecreaseItem_TypeLS`). Without it the cast goes through but the icon never enters cooldown state.
+
+### Existing handler change: `ItemConsumePacketProcessor.MemorySkillRegister`
+
+Item-type 67 chips dispatch into a new `MemorySkillRegister` private async path. Reads `chipItem.ItemInfo.SkillCode`, looks up bin row, validates `IsMemorySkill`, then enforces:
+- Duplicate same-skill — fail with "already learned".
+- **Same memory-type already on this evolution** — bin's `s_nMemorySkill ∈ {1, 2, 3}` (ATK / DEF / AST) and chip's `Type_L` (low byte of item Type) matches the bin field; only **2 memory skills per evolution** (`MaxMemorySkillsPerEvolution = 2`), one per category.
+
+Dispatches `AddMemorySkillCommand`, consumes the item via `RemoveOrReduceItemsBySection`, broadcasts `MemorySkillAddPacket`, persists evolution row.
+
+### `InitialInfoPacket` — cash-skill block (memory-skill loadout) wire format
+
+The packet's cash-skill block per-entry layout is **17 bytes**, not 25, because v487's `pCountry.h:82` defines `MAX_ItemSkillDigimon = 2` (not 3). Per-entry: `1 EvoStatus + 2×u4 SkillCodes + 2×u4 CooldownsMs`. Wrong size throws off every payload below in the packet and stalls the login at "Ready" pending. New helper `WriteMemorySkillBlock(IList<DigimonEvolutionModel>, Func<int,byte> evoStageLookup)` does this correctly and reads `evoStage` from `DigimonEvoBinLoader` (per-tree `EvoSlot` 1-based, NOT the global `nEvo::` stage from `Digimon_List.bin EvolutionType`).
+
+Two buff-timer fields in the same packet (tamer + partner) switched from `UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds)` → `buff.Duration == 0 ? unchecked((int)uint.MaxValue) : Math.Max(1, buff.RemainingSeconds)`. Same `_TIME_TS=0` reason — was sending a 20,000-day timer on relog.
+
+### `Buff.bin` loader change: keep `s_bDelete=true` records
+
+`BuffBinLoader` now keeps records with `IsDeleted=true` in the in-memory map instead of dropping them at parse time; `BuffInfoAssetsQueryHandler` filters them at query time. Memory-skill buffs in v487 (e.g. BuffId 40540 for skill 9000041 Ruler of Earth) are flagged deleted in the bin per the original DMO regional-disable convention, but the memory-skill use handler reads them through the raw bin loader (not the filtered query) to apply them anyway. Existing non-memory-skill consumers still see the filtered view — no semantic change for them.
+
+### Reference — three latent crashes / asserts surfaced + memorized
+
+These are documented in `~/.claude/projects/.../memory/` so the same wall isn't hit again:
+
+1. **`Apply.A` vs `Apply.Id`** — `s_nA` is the **attribute** (which stat is hit), `s_dwBuffID` (mapped to `Type` in the asset) is the **formula** (damage vs buff). Route by formula. The client's `RecvMemorySkill_EffectSync` switch on `s_nA` is **VFX selection only** — its `case 1: heal-VFX` comment is a VFX label, not a gameplay semantic. Misreading this turned Ruler of Space Mid into a "heal" branch instead of damage.
+2. **Apply formula → math table** — `SkillCodeApplyTypeEnum.cs` documents 101 (flat) / 102 (`% of max`) / 105 (`% of current`) / 106 (`% of max`, heal-item convention) / 200 (no immediate effect, buff entry only). Always look up the formula in the table before deciding what `B` means.
+3. **`pGame::HpRate` (1007) self-echo assert** — `cCliGameReceive.cpp:2083` asserts `pObject->GetLeafRTTI() != RTTI_DIGIMON_USER`. Use `BroadcastForTargetTamers` (excludes caster) for the HpRate + `client.Send(UpdateStatusPacket)` for the local UI. Never `BroadcastForTamerViewsAndSelf` for HpRate.
+
 ## Skill.bin migration — full skill data off DB into in-memory bin
 
 Static skill data — the catalog of every digimon/tamer/monster/item skill plus per-digimon skill loadouts — moves from MariaDB to v487's `Skill.bin` and `Digimon_List.bin`. Five DB-backed queries retired, one new bin loader, plus two pre-existing bugs in the partner-skill cast path that the migration surfaced and fixed.

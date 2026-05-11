@@ -117,6 +117,9 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Character
                 .Include(x => x.Digimons)
                     .ThenInclude(y => y.Evolutions)
                         .ThenInclude(z => z.Skills)
+                .Include(x => x.Digimons)
+                    .ThenInclude(y => y.Evolutions)
+                        .ThenInclude(z => z.MemorySkills)
                 .SingleOrDefaultAsync(x => x.Id == characterId);
 
             if (character != null)
@@ -142,6 +145,8 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Character
                 .Include(x => x.AttributeExperience)
                 .Include(x => x.Evolutions)
                     .ThenInclude(y => y.Skills)
+                .Include(x => x.Evolutions)
+                    .ThenInclude(y => y.MemorySkills)
                 .Include(x => x.BuffList)
                     .ThenInclude(x => x.Buffs)
                 .SingleOrDefaultAsync(x => x.Id == digimonId);

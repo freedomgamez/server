@@ -34,9 +34,14 @@
         public byte SkillMastery { get; private set; }
 
         /// <summary>
-        /// Available skills for the evolution.
+        /// Available skills for the evolution (fixed slot 0..3 inherent skills).
         /// </summary>
         public List<DigimonEvolutionSkillModel> Skills { get; private set; }
+
+        /// <summary>
+        /// Cash-shop-acquired memory skills attached to this evolution (variable-length).
+        /// </summary>
+        public List<DigimonMemorySkillModel> MemorySkills { get; private set; } = new();
         
         public DigimonEvolutionModel(int type)
         {

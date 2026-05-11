@@ -46,17 +46,31 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         {
             var packet = new GamePacketReader(packetData);
 
-            var vipEnabled = packet.ReadByte();
-            var u2 = packet.ReadInt();
+            // v487 wire format (cCliGame::SendDigitamaScanItem) — both bVIPMemberMode
+            // and uInvenActiveItemSlot are gated by client defines:
+            //   bVIPMemberMode      → SDM_VIP_SYSTEM_20181105   (NOT defined in v487)
+            //   uInvenActiveItemSlot → ITEM_USE_TIME_PASS        (defined in v487)
+            // So actual v487 payload is: u4 PortableIdx | u4 NpcIdx | u4 InvenPos | u2 ScanCount.
+            // Earlier code read an extra u1 vip prefix that the client never sends, which
+            // slid every subsequent field by one byte — slotToScan ended up as 16777216
+            // instead of the real slot.
+            const byte vipEnabled = 0;
+            var portableIdx = packet.ReadInt();
             var npcId = packet.ReadInt();
             var slotToScan = packet.ReadInt();
             var amountToScan = packet.ReadShort();
+            var u2 = portableIdx; // kept for any later log line that still references u2
 
             var scannedItem = client.Tamer.Inventory.FindItemBySlot(slotToScan);
             if (scannedItem == null || scannedItem.ItemId == 0 || scannedItem.ItemInfo == null)
             {
                 client.Send(new SystemMessagePacket($"Invalid item at slot {slotToScan}."));
-                _logger.Warning($"Invalid item on slot {slotToScan} for tamer {client.TamerId} on scanning.");
+                var invSlots = string.Join(",", client.Tamer.Inventory.Items
+                    .Where(i => i.ItemId > 0)
+                    .Select(i => $"slot={i.Slot}/item={i.ItemId}"));
+                _logger.Warning(
+                    "Scan: client sent slot={Slot} vip={Vip} portable={Portable} npc={Npc} count={Count}; tamer {TamerId} inventory items: [{Inv}]",
+                    slotToScan, vipEnabled, u2, npcId, amountToScan, client.TamerId, invSlots);
                 return;
             }
 

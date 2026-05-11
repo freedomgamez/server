@@ -1,4 +1,5 @@
 ﻿using DigitalWorldOnline.Commons.Models.Character;
+using DigitalWorldOnline.Commons.Models.Digimon;
 using DigitalWorldOnline.Commons.Models.Mechanics;
 using DigitalWorldOnline.Commons.Utils;
 using DigitalWorldOnline.Commons.Writers;
@@ -13,7 +14,16 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
         /// Initial information for character spawn.
         /// </summary>
         /// <param name="character">The tamer that is trying to log-in</param>
-        public InitialInfoPacket(CharacterModel character, GameParty? party)
+        /// <param name="party">Active party, or <c>null</c>.</param>
+        /// <param name="evoStageLookup">
+        /// Maps a digimon-type-id to the bin's evolution-stage byte
+        /// (<see cref="DigimonListEntry.EvolutionType"/>), so memory-skill entries
+        /// emit the right <c>s_nDigimonEvoStatus</c> for the v487 client to bind
+        /// each chip to the correct stage in <c>cSkill::AddDigimonCashSkill</c>.
+        /// Pass <c>null</c> to fall back to <c>(index+1)</c> — wire stays valid,
+        /// UI just attaches the skill to a possibly-wrong stage.
+        /// </param>
+        public InitialInfoPacket(CharacterModel character, GameParty? party, Func<int, byte>? evoStageLookup = null)
         {
             Type(PacketNumber);
             WriteInt(1);
@@ -48,7 +58,11 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
             {
                 WriteShort((short)buff.BuffId);
                 WriteShort((short)buff.TypeN);
-                WriteInt(UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
+                // See partner-buff loop below for the rationale: v487 _TIME_TS=0 forever,
+                // so client interprets this field as raw-seconds-remaining, NOT a Unix
+                // timestamp.  Always-on (Duration==0) buffs need UINT_MAX sentinel.
+                WriteInt(buff.Duration == 0 ? unchecked((int)uint.MaxValue)
+                                            : Math.Max(1, buff.RemainingSeconds));
                 WriteInt(buff.SkillId);
             }
 
@@ -114,7 +128,14 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
             {
                 WriteShort((short)buff.BuffId);
                 WriteShort((short)buff.TypeN);
-                WriteInt(UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
+                // v487 nlib's cClient::m_timets is initialized to 0 and never set, so the
+                // client computes "remaining = nEndTS - _TIME_TS = nEndTS - 0".  Sending a
+                // Unix-epoch absolute timestamp here makes the client display 56 years.
+                // Send raw remaining-seconds for timed buffs; for always-on (Duration==0,
+                // e.g., tamer-base passives like Valor of Marcus) send UINT_MAX which the
+                // client treats as infinite (cBuffData::SetBuff handles UINT_MAX as sentinel).
+                WriteInt(buff.Duration == 0 ? unchecked((int)uint.MaxValue)
+                                            : Math.Max(1, buff.RemainingSeconds));
                 WriteInt(buff.SkillId);
             }
 
@@ -134,7 +155,7 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
             WriteShort(character.Partner.AttributeExperience.Steel);
 
             WriteInt(0);//nUID (não é mais utilizado?)
-            WriteByte(0);//TODO: CashSkillCount (se passar acima de 0, informar o objeto)
+            WriteMemorySkillBlock(character.Partner.Evolutions, evoStageLookup);
 
             byte slot = 1;
             foreach (var digimon in character.ActiveDigimons)
@@ -208,7 +229,7 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
                 WriteShort(digimon.AttributeExperience.Steel);
 
                 WriteInt(16404); //16404
-                WriteByte(0);
+                WriteMemorySkillBlock(digimon.Evolutions, evoStageLookup);
 
                 slot++;
             }
@@ -365,6 +386,90 @@ namespace DigitalWorldOnline.Commons.Packets.GameServer
             WriteInt(0);
 
             WriteBytes(new byte[29]);
+        }
+
+        /// <summary>
+        /// Writes the per-digimon memory-skill block expected by the v487 client's
+        /// <c>cCliGame::RecvInitGameData</c> (cCliGameReceive.cpp:511-523 for the partner,
+        /// and the matching tactics-slot block).  Wire format:
+        /// <code>
+        ///   u1  nDSkillCnt                 — count of evolutions with ≥1 memory skill
+        ///   for each entry:
+        ///     u1  s_nDigimonEvoStatus      — 1-based evolution slot index
+        ///     u4[3] s_nDigimonCashSkillCode — memory skill ids (0-pad unused)
+        ///     u4[3] s_nSkillCoolTime        — remaining cooldown in ms (0 = ready)
+        /// </code>
+        /// <para>
+        /// The 1-based slot index matches the order the evolutions are written in the
+        /// EvoUnit block above — the client correlates entries by walking its own
+        /// <c>s_EvoUnit[i]</c> array, so server-side iteration order MUST match the
+        /// preceding evolution-info loop in this packet.
+        /// </para>
+        /// </summary>
+        private void WriteMemorySkillBlock(IList<DigimonEvolutionModel> evolutions, Func<int, byte>? evoStageLookup = null)
+        {
+            // v487 client per-entry layout (cCliGameReceive.cpp:518-523):
+            //   u1     EvoStatus           — value comes from CsDigimonEvolveObj::m_nEvoSlot
+            //   u4[N]  CashSkillCode       — N = nLimit::MAX_ItemSkillDigimon
+            //   u4[N]  SkillCoolTime
+            // CRITICAL: N is *2* in v487, not 3.  pCountry.h:82 defines
+            // pCountry::MAX_ItemSkillDigimon = 2 for this build, which nLimit picks up
+            // via the typedef chain.  Writing 3 slots here adds 8 stray bytes that
+            // shift every later field by 8 — the client's 99-sentinel read lands
+            // mid-cooldown, it enters the tactics-digimon while-loop on garbage, and
+            // the complementary-info request never fires (login appears to hang).
+            const int MaxSkillsPerEvolution = 2;
+            var now = DateTime.UtcNow;
+
+            // Find evolutions that actually have memory skills.
+            var entries = new List<(byte Slot, DigimonEvolutionModel Evo)>();
+            for (int i = 0; i < evolutions.Count; i++)
+            {
+                var evo = evolutions[i];
+                if (evo.MemorySkills.Count == 0) continue;
+
+                // Resolve the slot value the client expects.  The v487 client compares
+                // s_nDigimonEvoStatus against pFTEvolObj->m_nEvoSlot (a value from
+                // DigimonEvo.bin / Digimon_List.bin), so the byte we emit must be the
+                // bin's evolution stage number — Rookie=3, Champion=4, Ultimate=5,
+                // Mega=6, BurstMode=7, ChampionX=12, etc.  When a stage lookup is
+                // available we use it; otherwise fall back to (i+1) which keeps the
+                // packet well-formed (login works) but may attach the skill under the
+                // wrong stage in the UI.
+                byte slot = evoStageLookup != null
+                    ? evoStageLookup(evo.Type)
+                    : (byte)(i + 1);
+                if (slot == 0) slot = (byte)(i + 1);  // unmapped → safe fallback
+
+                entries.Add((slot, evo));
+            }
+
+            WriteByte((byte)entries.Count);
+
+            foreach (var (slot, evo) in entries)
+            {
+                WriteByte(slot);
+
+                // SkillCode[N] — pad with 0 for any unused slots.
+                for (int i = 0; i < MaxSkillsPerEvolution; i++)
+                    WriteInt(i < evo.MemorySkills.Count ? evo.MemorySkills[i].SkillId : 0);
+
+                // CoolTime[N] — milliseconds remaining; 0 = ready to cast.
+                for (int i = 0; i < MaxSkillsPerEvolution; i++)
+                {
+                    if (i < evo.MemorySkills.Count)
+                    {
+                        var remaining = evo.MemorySkills[i].CooldownEndsAt - now;
+                        WriteInt(remaining.TotalMilliseconds > 0
+                            ? (int)remaining.TotalMilliseconds
+                            : 0);
+                    }
+                    else
+                    {
+                        WriteInt(0);
+                    }
+                }
+            }
         }
     }
 }

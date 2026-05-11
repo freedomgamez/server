@@ -68,6 +68,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             if (skill == null || skill.SkillInfo == null)
                 return Task.CompletedTask;
 
+            // Passive skills (CsSkill::s_nAttType == 4) are always-on buffs — they fire from
+            // buff-state machinery, never from a player-triggered cast packet.  Reject so a
+            // crafted client can't trigger damage/cooldown logic on a non-active skill.
+            if (skill.SkillInfo.IsPassive)
+                return Task.CompletedTask;
+
             var targetSummonMobs = new List<SummonMobModel>();
             SkillTypeEnum skillType;
             if (client.DungeonMap)

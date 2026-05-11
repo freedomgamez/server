@@ -205,17 +205,13 @@ namespace DigitalWorldOnline.Commons.Models.Base
         {
             if (slot < 0) return null;
 
-            var ItemInfo = Items.First(x => x.Slot == slot);
-
-            return ItemInfo;
+            return Items.FirstOrDefault(x => x.Slot == slot);
         }
         public ItemModel FindItemByTradeSlot(int slot)
         {
             if (slot < 0) return null;
 
-            var ItemInfo = Items.First(x => x.TradeSlot == slot);
-
-            return ItemInfo;
+            return Items.FirstOrDefault(x => x.TradeSlot == slot);
         }
         public ItemModel GiftFindItemBySlot(int slot)
         {

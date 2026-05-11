@@ -51,6 +51,7 @@ namespace DigitalWorldOnline.Application.GameAssets
         public List<CloneAssetModel> Clones { get; private set; }
         public List<CloneValueAssetModel> CloneValues { get; private set; }
         public List<TamerSkillAssetModel> TamerSkills { get; private set; }
+        public List<TamerSkillAreaCheckAssetModel> TamerSkillAreaChecks { get; private set; }
         public List<NpcAssetModel> Npcs { get; private set; }
         public List<NpcColiseumAssetModel> NpcColiseum { get; private set; }
         public List<ArenaRankingDailyItemRewardsModel> ArenaRankingDailyItemRewards { get; private set; }
@@ -107,6 +108,7 @@ namespace DigitalWorldOnline.Application.GameAssets
             Clones = _mapper.Map<List<CloneAssetModel>>(await _sender.Send(new CloneAssetsQuery()));
             CloneValues = _mapper.Map<List<CloneValueAssetModel>>(await _sender.Send(new CloneValueAssetsQuery()));
             TamerSkills = _mapper.Map<List<TamerSkillAssetModel>>(await _sender.Send(new TamerSkillAssetsQuery()));
+            TamerSkillAreaChecks = _mapper.Map<List<TamerSkillAreaCheckAssetModel>>(await _sender.Send(new TamerSkillAreaChecksQuery()));
             MonthlyEvents = _mapper.Map<List<MonthlyEventAssetModel>>(await _sender.Send(new MonthlyEventAssetsQuery()));
             AchievementAssets = _mapper.Map<List<AchievementAssetModel>>(await _sender.Send(new AchievementAssetsQuery()));
             ArenaRankingDailyItemRewards = _mapper.Map<List<ArenaRankingDailyItemRewardsModel>>(await _sender.Send(new ArenaRankingDailyItemRewardsQuery()));

@@ -58,6 +58,24 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                 var targetSkill = _assets.TamerSkills.FirstOrDefault(x => x.SkillId == SkillId);
 
+                // Combat lockout: tamer skills with s_nUseState == 1 are forbidden during
+                // battle (CsTamerSkill::sTSkill_INFO field).  Mirror the client gate so a
+                // crafted client can't bypass the restriction.
+                if (targetSkill != null && targetSkill.UseState == 1 && client.Tamer.InBattle)
+                    return;
+
+                // Area-restriction: when s_nUseAreaCheck == 1, look up the AreaCheck row
+                // (Skill.bin §3) for this skill's index.  Available == 1 = blacklist (the
+                // listed MapIds forbid this skill); Available == 2 = whitelist (skill is
+                // ONLY usable in the listed MapIds).  Any other Available value is a no-op.
+                if (targetSkill != null && targetSkill.UseAreaCheck == 1)
+                {
+                    var areas = _assets.TamerSkillAreaChecks.FirstOrDefault(x => x.Index == targetSkill.SkillId);
+                    var inList = areas != null && areas.MapIds.Contains(client.Tamer.Location.MapId);
+                    if (targetSkill.Available == 1 && inList) return;     // blacklist hit
+                    if (targetSkill.Available == 2 && !inList) return;    // whitelist miss
+                }
+
                 if (targetSkill != null)
                 {
 
@@ -69,6 +87,13 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                         if (TargetSkillInfo != null)
                         {
+                            // Passive skills (CsSkill::s_nAttType == 4) are always-on
+                            // buffs.  A tamer-skill cast packet for a passive skill is
+                            // either a misconfigured catalog row or a crafted client —
+                            // either way reject before running damage/buff logic.
+                            if (TargetSkillInfo.IsPassive)
+                                return;
+
                             var TargetType = (SkillTargetTypeEnum)TargetSkillInfo.Target;
 
 
