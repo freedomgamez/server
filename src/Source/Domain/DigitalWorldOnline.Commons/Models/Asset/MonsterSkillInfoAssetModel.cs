@@ -43,6 +43,19 @@ namespace DigitalWorldOnline.Commons.Models.Asset
         /// <summary>Bin's <c>s_nRangeIdx</c> — FK into <c>CsMonsterSkillTerms.s_nIDX</c> (AoE shape).</summary>
         public int RangeId { get; set; }
 
+        /// <summary>
+        /// Denormalised Terms data — resolved at AssetsLoader load time by joining
+        /// <see cref="RangeId"/> against <c>Monster.bin §4 TermsByIndex</c>.  Zero when
+        /// no matching Terms row exists (bin's reserved index 0).  Carries the AoE
+        /// radius the dispatcher uses instead of the hardcoded constants we shipped
+        /// pre-join.  Direction / TargetingType / RefCode are exposed too in case
+        /// future cases need cone-shape gating.
+        /// </summary>
+        public uint RangeUnits { get; set; }
+        public ushort RangeDirection { get; set; }
+        public ushort RangeTargetingType { get; set; }
+        public ushort RangeRefCode { get; set; }
+
         /// <summary>Bin's <c>s_nAni_Delay</c> — client animation delay (ms). Server keeps for parity but doesn't act on it.</summary>
         public float AnimationDelay { get; set; }
 

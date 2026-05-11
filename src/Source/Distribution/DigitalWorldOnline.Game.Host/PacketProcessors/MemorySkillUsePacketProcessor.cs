@@ -77,10 +77,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             int attackerHandler = digimonUID & CTypeClassIdxMask;
             int targetHandler = targetUID & CTypeClassIdxMask;
 
-            _logger.Information(
-                "MemorySkillUse RX: tamer {TamerId}  rawDigimonUID=0x{RawDigimonUID:X8} -> attacker=0x{AttackerHandler:X8}  evoStep={EvoStep}  skillCode={SkillCode}  rawTargetUID=0x{RawTargetUID:X8} -> target=0x{TargetHandler:X8}",
-                client.TamerId, digimonUID, attackerHandler, evoStep, skillCode, targetUID, targetHandler);
-
             if (client.Partner == null)
             {
                 _logger.Warning("MemorySkillUse: tamer {TamerId} has no Partner — dropping cast.", client.TamerId);
@@ -107,12 +103,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
 
             if (owned.IsOnCooldown)
-            {
-                _logger.Verbose(
-                    "Tamer {TamerId} memory-skill {SkillId} still on cooldown until {Until}.",
-                    client.TamerId, skillCode, owned.CooldownEndsAt);
                 return;
-            }
 
             var skillInfo = _assets.SkillInfo.FirstOrDefault(x => x.SkillId == skillCode);
             if (skillInfo == null || !skillInfo.IsMemorySkill || skillInfo.IsPassive)
@@ -164,22 +155,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         client.TamerId, skillCode, targetHandler, mapId, client.DungeonMap);
                     return;
                 }
-                if (!targetMob.Alive)
-                {
-                    _logger.Verbose(
-                        "MemorySkillUse: tamer {TamerId} cast skill {SkillId} on dead mob {MobId}.",
-                        client.TamerId, skillCode, targetMob.Id);
-                    return;
-                }
-                _logger.Information(
-                    "MemorySkillUse: tamer {TamerId} skill {SkillId} resolved target mob {MobId} ({MobName}) hp={Hp}/{MaxHp} at 0x{Handler:X8}.",
-                    client.TamerId, skillCode, targetMob.Id, targetMob.Name, targetMob.CurrentHP, targetMob.HPValue, targetMob.GeneralHandler);
-            }
-            else
-            {
-                _logger.Information(
-                    "MemorySkillUse: tamer {TamerId} self-cast skill {SkillId} on partner 0x{Handler:X8}.",
-                    client.TamerId, skillCode, attackerHandler);
+                if (!targetMob.Alive) return;
             }
 
             // Resource costs come from the skill's bin row — memory skills aren't free.
@@ -290,10 +266,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                     client.Send(new UpdateStatusPacket(client.Tamer));
 
-                    _logger.Information(
-                        "Tamer {TamerId} self-cast memory skill {SkillId} → instant heal {Amount} (partner HP {Cur}/{Max}).",
-                        client.TamerId, skillCode, healAmount, client.Partner.CurrentHp, client.Partner.HP);
-
                     // Heal VFX is driven by the effect-sync (1122) which the client maps
                     // to "Buff_Hp_Absorb.nif" on Apply.Type 1/47.  Send it now and we're
                     // done — no buff to add, instant effects don't persist.
@@ -361,10 +333,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId, addBuffPacket);
                     else
                         _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId, addBuffPacket);
-
-                    _logger.Information(
-                        "Tamer {TamerId} self-cast memory skill {SkillId} → applied buff {BuffId} for {DurSec}s (deleted={IsDel}, persisted).",
-                        client.TamerId, skillCode, rawBuff.Id, MemorySkillBuffDurationSeconds, rawBuff.IsDeleted);
                 }
                 else
                 {

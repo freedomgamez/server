@@ -321,6 +321,16 @@ namespace DigitalWorldOnline.Commons.Models.Map
             mob.UpdateLastHitTry();
         }
         /// <summary>
+        /// Resolve a skill's AoE radius: prefer the bin-joined value from
+        /// <c>Terms[RangeId].Range</c> (now exposed on the DTO as <c>RangeUnits</c>);
+        /// fall back to the legacy hardcoded 1900-unit gate when the bin row has no
+        /// Terms row (RangeId = 0).  Used by every AoE distance check in the dispatcher
+        /// so a Monster.bin tuning change actually reaches the server-side hit-test.
+        /// </summary>
+        private static int MobSkillRadius(MonsterSkillInfoAssetModel skill)
+            => skill.RangeUnits > 0 ? (int)skill.RangeUnits : 1900;
+
+        /// <summary>
         /// Roll one effect-value sample from the bin's [MinValue..MaxValue] range
         /// (s_dwEff_Val_Min / s_dwEff_Val_Max).  Pre-Step-8 the server always used
         /// MaxValue as a flat number; Step 8 honours the bin's actual range.
@@ -329,6 +339,92 @@ namespace DigitalWorldOnline.Commons.Models.Map
         {
             if (skill.MaxValue <= skill.MinValue) return skill.MaxValue;
             return Random.Shared.Next(skill.MinValue, skill.MaxValue + 1);
+        }
+
+        // ─── Pending-summon queue (Phase 5) ──────────────────────────────────
+        // SUMMON_MONSTER / SummonPos dispatch can't build a SummonMobModel from here
+        // because (a) the catalog (MonsterBinLoader) lives in Application and (b) the
+        // broadcast-aware spawn API (_mapServer.AddSummonMobs) lives in Distribution.
+        // The dispatcher enqueues a PendingSummon and the map-server drains it.
+        private readonly System.Collections.Generic.Queue<PendingSummon> _pendingSummons = new();
+        private readonly object _pendingSummonsLock = new();
+
+        public void EnqueueSummon(PendingSummon summon)
+        {
+            lock (_pendingSummonsLock) _pendingSummons.Enqueue(summon);
+        }
+
+        /// <summary>Drain the queue.  Caller (Distribution) builds + spawns each one.</summary>
+        public System.Collections.Generic.List<PendingSummon> DrainPendingSummons()
+        {
+            lock (_pendingSummonsLock)
+            {
+                if (_pendingSummons.Count == 0) return new System.Collections.Generic.List<PendingSummon>();
+                var list = new System.Collections.Generic.List<PendingSummon>(_pendingSummons);
+                _pendingSummons.Clear();
+                return list;
+            }
+        }
+
+        // ─── AoE-zone tick infrastructure ────────────────────────────────────
+        // Persistent zones spawned by ATTACH_SEED (18), Region_Buff_Nesting (23),
+        // RandomAoE (27), CONTINUE_WIDE_ATTACK (20).  Lock guards add/remove against
+        // the tick loop which the map-server thread runs once per MonsterOperation cycle.
+        private readonly List<MapAoeZone> _aoeZones = new();
+        private readonly object _aoeZonesLock = new();
+
+        public void AddAoeZone(MapAoeZone zone)
+        {
+            lock (_aoeZonesLock) _aoeZones.Add(zone);
+        }
+
+        /// <summary>
+        /// Tick every active zone.  Called from <c>MapServer.MonsterOperation</c> at the
+        /// top of each map cycle.  Zones whose <c>TicksRemaining</c> hit zero (or whose
+        /// <c>ExpiresAt</c> elapsed) are removed.
+        /// </summary>
+        public void TickAoeZones()
+        {
+            List<MapAoeZone> snapshot;
+            lock (_aoeZonesLock) snapshot = _aoeZones.ToList();
+            if (snapshot.Count == 0) return;
+
+            var toRemove = new List<MapAoeZone>(snapshot.Count);
+            foreach (var z in snapshot)
+                if (z.Tick(this)) toRemove.Add(z);
+
+            if (toRemove.Count > 0)
+                lock (_aoeZonesLock) foreach (var z in toRemove) _aoeZones.Remove(z);
+        }
+
+        /// <summary>
+        /// Revert any expired GROWTH / BERSERK stat-mods.  Called from
+        /// <c>MapServer.MonsterOperation</c> alongside <see cref="TickAoeZones"/>.
+        /// </summary>
+        public void TickMobStatMods()
+        {
+            var now = System.DateTime.Now;
+            foreach (var mob in Mobs)
+            {
+                bool growExpired = mob.GrowStack > 0 && mob.GrowExpiresAt != default && now >= mob.GrowExpiresAt;
+                bool berserkExpired = mob.Berserk && now >= mob.BerserkExpiresAt;
+                if (!growExpired && !berserkExpired) continue;
+                if (growExpired)
+                {
+                    mob.GrowStack = 0;
+                    mob.GrowExpiresAt = default;
+                }
+                if (berserkExpired)
+                {
+                    mob.Berserk = false;
+                    mob.BerserkReflectDamage = 0;
+                    mob.BerserkExpiresAt = default;
+                }
+                // Only restore stats once both modifiers are off.  If GROWTH is still active
+                // while BERSERK expires (or vice versa) we leave the combined snapshot alone —
+                // the next stat-mod cast recalculates against BaseATSnapshot/BaseDESnapshot.
+                if (mob.GrowStack == 0 && !mob.Berserk) mob.RestoreBaseStats();
+            }
         }
 
         /// <summary>
@@ -355,7 +451,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
                 var d = UtilitiesFunctions.CalculateDistance(
                     mob.CurrentLocation.X, partner.Location.X,
                     mob.CurrentLocation.Y, partner.Location.Y);
-                if (d <= 1900) alive.Add(partner);
+                if (d <= MobSkillRadius(skill)) alive.Add(partner);
             }
             if (alive.Count == 0) return;
 
@@ -393,14 +489,31 @@ namespace DigitalWorldOnline.Commons.Models.Map
         private const int EffectHpValIncrease       = 3;    // self-heal: flat roll
         private const int EffectHpValDecrease       = 4;    // damage in AoE around self
         private const int EffectDsValDecrease       = 10;   // DS drain
+        private const int EffectSummonMonster       = 13;   // spawn N mobs from catalog
+        private const int EffectGrowth              = 14;   // self stacking stat-up (DP/AP)
+        private const int EffectCallUp              = 15;   // rally nearby mobs to caster's target
+        private const int EffectBerserk             = 19;   // self one-shot stat-up + reflect
         private const int EffectAssemble            = 16;   // mark N targets, divide damage among them
         private const int EffectDisperse            = 17;   // mark N targets, full damage to each
+        private const int EffectAttachSeed          = 18;   // drop N "seed" zones at target positions
+        private const int EffectContinueWide        = 20;   // caster-anchored AoE, ticks N times
         private const int EffectBuffOccure          = 21;   // apply buff (self or target)
         private const int EffectSingleStackDebuff   = 22;   // single-target damage + debuff stack
+        private const int EffectRegionBuffNesting   = 23;   // ground zone — ticks debuff onto in-zone targets
         private const int EffectGatheringExt        = 25;   // ASSEMBLE with projectile VFX (server-identical)
         private const int EffectDisperseExt         = 26;   // DISPERSE with projectile VFX (server-identical)
+        private const int EffectRandomAoE           = 27;   // pick N random positions, one-tick damage in each
+        private const int EffectChainBounce         = 28;   // Qinglongmon-style chain lightning
         private const int EffectExterminate         = 30;   // map-wide damage (no distance gate)
+        private const int EffectSummonPos           = 31;   // spawn N mobs at bin-fixed coord
         private const int EffectLegacyHardcoded     = 27045;// pre-bin-migration DB synonym for case 4
+
+        // Once-per-SkillType warning log for SkillTypes not covered by any case arm.
+        // Without this, an unrecognised value would silently no-op and we'd never know
+        // the bin had a row we hadn't implemented.  HashSet is process-local — restarts
+        // re-emit; that's fine, it's a dev signal.
+        private static readonly System.Collections.Generic.HashSet<int> _warnedUnhandledMobSkillTypes = new();
+        private static readonly object _warnedUnhandledLock = new();
 
         // Default monster-cast buff/debuff duration when the bin row's MaxValue is 0
         // — the bin sometimes carries 0 for "use the buff's own default", which we
@@ -474,7 +587,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
                             var d = UtilitiesFunctions.CalculateDistance(
                                 mob.CurrentLocation.X, clientToModify.Partner.Location.X,
                                 mob.CurrentLocation.Y, clientToModify.Partner.Location.Y);
-                            if (d > 1900) continue;
+                            if (d > MobSkillRadius(targetSkill)) continue;
                             clientToModify.Partner.BuffList.Add(DigimonBuffModel.Create(buffId, skillCode, 0, duration));
                             BroadcastForTargetTamers(mob.TamersViewing,
                                 new AddBuffPacket(clientToModify.Partner.GeneralHandler, buffId, skillCode, 0, duration).Serialize());
@@ -505,7 +618,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
                     var d = UtilitiesFunctions.CalculateDistance(
                         mob.CurrentLocation.X, target.Location.X,
                         mob.CurrentLocation.Y, target.Location.Y);
-                    if (d > 1900) break;
+                    if (d > MobSkillRadius(targetSkill)) break;
 
                     var dmg = RollMonsterSkillValue(targetSkill);
                     var newHp = target.ReceiveDamage(dmg);
@@ -552,6 +665,72 @@ namespace DigitalWorldOnline.Commons.Models.Map
                     break;
                 }
 
+                // ─── ChainBounce (eEFFECT_TYPE = 28) ────────────────────────
+                // Qinglongmon-style chain lightning.  Start at caster's current target,
+                // bounce to nearest tamer-partner within Range that isn't already in the
+                // chain, up to TargetCount links.  Each link takes damage; the VFX is
+                // broadcast as a single chain packet (16027) that the client renders as
+                // a sequence of lightning bolts between consecutive pairs.
+                case EffectChainBounce:
+                {
+                    if (mob.Target == null) break;
+                    int maxChain = targetSkill.TargetCount > 0 ? targetSkill.TargetCount : 3;
+                    int bounceRange = MobSkillRadius(targetSkill);
+                    int mapId = mob.Location.MapId;
+
+                    var chain = new List<DigimonModel> { mob.Target };
+                    var used = new HashSet<long> { mob.Target.Id };
+
+                    while (chain.Count < maxChain)
+                    {
+                        var last = chain[chain.Count - 1];
+                        DigimonModel? next = null;
+                        int bestDist = int.MaxValue;
+                        foreach (var c in Clients.ToList())
+                        {
+                            var partner = c.Tamer?.Partner;
+                            if (partner == null || !partner.Alive) continue;
+                            if (partner.Location.MapId != mapId) continue;
+                            if (used.Contains(partner.Id)) continue;
+                            int d = (int)UtilitiesFunctions.CalculateDistance(
+                                last.Location.X, partner.Location.X,
+                                last.Location.Y, partner.Location.Y);
+                            if (d > bounceRange) continue;
+                            if (d < bestDist) { bestDist = d; next = partner; }
+                        }
+                        if (next == null) break;
+                        chain.Add(next);
+                        used.Add(next.Id);
+                    }
+
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+
+                    // Roll damage per link (could decay — bin spec is ambiguous, treat each
+                    // link as a fresh roll of [MinValue..MaxValue]).
+                    foreach (var link in chain)
+                    {
+                        var dmg = RollMonsterSkillValue(targetSkill);
+                        var newHp = link.ReceiveDamage(dmg);
+                        var hpRate = (byte)((long)link.CurrentHp * 255L / System.Math.Max(1, (int)link.HP));
+                        bool died = newHp <= 0;
+                        if (died) link.Die();
+                        BroadcastForTargetTamers(mob.TamersViewing,
+                            new SkillHitPacket(mob.GeneralHandler, link.GeneralHandler, 0, dmg, hpRate).Serialize());
+                    }
+
+                    // Chain-VFX broadcast (cosmetic): the chain packet only renders the
+                    // lightning between pairs; needs ≥2 targets to look like a chain.
+                    if (chain.Count >= 2)
+                    {
+                        var handlers = new List<int>(chain.Count);
+                        foreach (var link in chain) handlers.Add(link.GeneralHandler);
+                        BroadcastForTargetTamers(mob.TamersViewing,
+                            new MobChainSkillPacket(mob.GeneralHandler, targetSkill.SkillId, handlers).Serialize());
+                    }
+                    break;
+                }
+
                 // ─── Map-wide damage (eEFFECT_TYPE = 30 Exterminate) ──────
                 // Same as HP_VAL_DECREASE but no distance gate — every player on the
                 // map gets hit.  Wipe-mechanic boss attacks ("global annihilation").
@@ -588,11 +767,386 @@ namespace DigitalWorldOnline.Commons.Models.Map
                             var d = UtilitiesFunctions.CalculateDistance(
                                 mob.CurrentLocation.X, clientToModify.Partner.Location.X,
                                 mob.CurrentLocation.Y, clientToModify.Partner.Location.Y);
-                            if (d <= 1900) clientToModify.Partner.UseDs(drain);
+                            if (d <= MobSkillRadius(targetSkill)) clientToModify.Partner.UseDs(drain);
                         }
                         BroadcastForTargetTamers(mob.TamersViewing,
                             new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
                     }
+                    break;
+                }
+
+                // ─── SUMMON_MONSTER (eEFFECT_TYPE = 13) ────────────────────
+                // Spawn TargetCount new mobs from catalog (MinValue = MonsterId).
+                // Anchor: ActiveType 0 = self, 1 = target, 2 = falls back to self
+                // (real coord is not in the bin row).  Drained by MapServerMonsterOperation.
+                case EffectSummonMonster:
+                {
+                    int monsterId = (int)targetSkill.MinValue;
+                    if (monsterId <= 0) break;
+                    int count = targetSkill.TargetCount > 0 ? targetSkill.TargetCount : 1;
+                    int ax, ay;
+                    switch (targetSkill.ActiveType)
+                    {
+                        case 1 when mob.Target != null:
+                            ax = mob.Target.Location.X; ay = mob.Target.Location.Y; break;
+                        default:
+                            ax = mob.CurrentLocation.X; ay = mob.CurrentLocation.Y; break;
+                    }
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+                    EnqueueSummon(new PendingSummon(monsterId, ax, ay, count, mob.Id, mob.TargetHandler));
+                    break;
+                }
+
+                // ─── SummonPos (eEFFECT_TYPE = 31) ─────────────────────────
+                // Same as SUMMON_MONSTER but bin row's MaxValue carries a packed coord
+                // (or two short halves) — v487 has 1 row of this type so the exact
+                // packing is uncertain.  Until we see a second row we fall back to
+                // anchoring at the caster (same as SUMMON_MONSTER ActiveType=0).
+                case EffectSummonPos:
+                {
+                    int monsterId = (int)targetSkill.MinValue;
+                    if (monsterId <= 0) break;
+                    int count = targetSkill.TargetCount > 0 ? targetSkill.TargetCount : 1;
+                    int ax = mob.CurrentLocation.X, ay = mob.CurrentLocation.Y;
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+                    EnqueueSummon(new PendingSummon(monsterId, ax, ay, count, mob.Id, mob.TargetHandler));
+                    break;
+                }
+
+                // ─── CALL_UP (eEFFECT_TYPE = 15) ───────────────────────────
+                // "MonsterGather" — rally living mobs within range to engage the
+                // caster's current target.  No new packets: re-uses the standard
+                // aggro path (StartBattle), and the existing run/sync stream pushes
+                // each rallied mob's new state to clients via the normal tick loop.
+                // RangeIndex → Terms.Range isn't exposed on the DTO yet, so we use
+                // a sensible default (2000 units ≈ a Tamer screen-width).
+                case EffectCallUp:
+                {
+                    if (mob.Target == null || mob.TargetTamer == null) break;
+                    var caller = mob.TargetTamer;
+                    int range = MobSkillRadius(targetSkill);
+                    int cap = targetSkill.TargetCount > 0 ? targetSkill.TargetCount : int.MaxValue;
+                    int called = 0;
+                    foreach (var sibling in Mobs)
+                    {
+                        if (called >= cap) break;
+                        if (sibling == mob || !sibling.Alive) continue;
+                        if (sibling.Location.MapId != mob.Location.MapId) continue;
+                        if (UtilitiesFunctions.CalculateDistance(
+                            mob.CurrentLocation.X, sibling.CurrentLocation.X,
+                            mob.CurrentLocation.Y, sibling.CurrentLocation.Y) > range) continue;
+                        sibling.StartBattle(caller);
+                        called++;
+                    }
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+                    break;
+                }
+
+                // ─── GROWTH (eEFFECT_TYPE = 14) ────────────────────────────
+                // Self stacking stat-up.  EffectFactor[i] selects which stat (29=AP/AT,
+                // 21=DP/DE, 41=visual-scale), EffectFactorValue[i] is % bonus per stack.
+                // Stack capped at MaxValue; reverts after duration (using MaxValue ms
+                // when EffectFactorValue is unit-less is ambiguous — we use a 30 s
+                // default + reset on death).
+                case EffectGrowth:
+                {
+                    mob.EnsureStatSnapshot();
+                    int cap = mob.HPValue > 0 && targetSkill.MaxValue > 0
+                        ? System.Math.Min(targetSkill.MaxValue, byte.MaxValue)
+                        : 5;
+                    int newStack = System.Math.Min(mob.GrowStack + 1, cap);
+                    mob.GrowStack = (byte)newStack;
+
+                    int atBonus = 0, deBonus = 0;
+                    for (int i = 0; i < targetSkill.EffectFactor.Length; i++)
+                    {
+                        int factor = targetSkill.EffectFactor[i];
+                        int pct = i < targetSkill.EffectFactorValue.Length ? (int)targetSkill.EffectFactorValue[i] : 0;
+                        if (pct == 0) continue;
+                        if (factor == 29) atBonus += (int)((long)mob.BaseATSnapshot * pct * newStack / 100);
+                        else if (factor == 21) deBonus += (int)((long)mob.BaseDESnapshot * pct * newStack / 100);
+                        // factor 41 = client-side scale VFX only
+                    }
+                    mob.SetAT(mob.BaseATSnapshot + atBonus);
+                    mob.SetDE(mob.BaseDESnapshot + deBonus);
+                    mob.GrowExpiresAt = System.DateTime.Now.AddMilliseconds(30_000);
+
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+                    break;
+                }
+
+                // ─── BERSERK (eEFFECT_TYPE = 19) ───────────────────────────
+                // Self one-shot stat-up (no stacking).  EffectFactor[i]/EffectFactorValue[i]
+                // map identically to GROWTH (29=AP %, 21=DP %).  MinValue carries the
+                // reflect-damage value (per Monster.h:149 "+ 반사 추가").  MaxValue =
+                // duration ms (fallback 30 s).  No new client packet — the visual is
+                // driven by the cast animation (ANI::BERSERK_SKILL).
+                case EffectBerserk:
+                {
+                    mob.EnsureStatSnapshot();
+                    int atBonus = 0, deBonus = 0;
+                    for (int i = 0; i < targetSkill.EffectFactor.Length; i++)
+                    {
+                        int factor = targetSkill.EffectFactor[i];
+                        int pct = i < targetSkill.EffectFactorValue.Length ? (int)targetSkill.EffectFactorValue[i] : 0;
+                        if (pct == 0) continue;
+                        if (factor == 29) atBonus += (int)((long)mob.BaseATSnapshot * pct / 100);
+                        else if (factor == 21) deBonus += (int)((long)mob.BaseDESnapshot * pct / 100);
+                    }
+                    mob.SetAT(mob.BaseATSnapshot + atBonus);
+                    mob.SetDE(mob.BaseDESnapshot + deBonus);
+                    mob.Berserk = true;
+                    mob.BerserkReflectDamage = (int)targetSkill.MinValue;
+                    int duration = targetSkill.MaxValue > 0 ? targetSkill.MaxValue : 30_000;
+                    mob.BerserkExpiresAt = System.DateTime.Now.AddMilliseconds(duration);
+
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+                    break;
+                }
+
+                // ─── ATTACH_SEED (eEFFECT_TYPE = 18) ───────────────────────
+                // Drop N seed-zones at target tamer positions; each zone ticks damage
+                // over its lifetime.  In v487 the client's RecvMonsterSkill_Use (1123)
+                // pops (targetUID, posX, posY) pairs — we skip that broadcast (server
+                // resolves spatially) and rely on per-tick MobAreaSkillPacket payloads
+                // for the visible damage, plus the cast-start visual.  Bin fields:
+                //   TargetCount          = seed count (clamped ≥ 1)
+                //   EffectFactorValue[0] = total zone lifetime ms (fallback 5000)
+                //   EffectFactor[0]      = tick count (fallback 1)
+                case EffectAttachSeed:
+                {
+                    int seedCount = System.Math.Max(1, (int)targetSkill.TargetCount);
+                    int lifetimeMs = targetSkill.EffectFactorValue.Length > 0 && targetSkill.EffectFactorValue[0] > 0
+                        ? (int)System.Math.Min(targetSkill.EffectFactorValue[0], (uint)int.MaxValue)
+                        : 5_000;
+                    int tickCount = targetSkill.EffectFactor.Length > 0 && targetSkill.EffectFactor[0] > 0
+                        ? targetSkill.EffectFactor[0]
+                        : 1;
+                    int interval = System.Math.Max(500, lifetimeMs / System.Math.Max(1, tickCount));
+
+                    var aliveTargets = new List<DigimonModel>();
+                    foreach (var t in new List<CharacterModel>(mob.TargetTamers))
+                    {
+                        var p = t.Partner;
+                        if (p == null || !p.Alive) continue;
+                        if (UtilitiesFunctions.CalculateDistance(
+                            mob.CurrentLocation.X, p.Location.X,
+                            mob.CurrentLocation.Y, p.Location.Y) <= 3000) aliveTargets.Add(p);
+                    }
+                    if (aliveTargets.Count == 0) break;
+
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+
+                    int seeds = System.Math.Min(seedCount, aliveTargets.Count);
+                    int dmg = RollMonsterSkillValue(targetSkill);
+                    int casterHandler = mob.GeneralHandler;
+                    int skillIndex = targetSkill.SkillId;
+                    // ATTACH_SEED radius — bin-driven (Terms.Range).  Each seed is a small
+                    // localised AoE, so the bin number is typically smaller than the
+                    // wide-AoE radii on cases 20/23.  Fallback uses the legacy 700.
+                    int radius = targetSkill.RangeUnits > 0 ? (int)targetSkill.RangeUnits : 700;
+                    int mapId = mob.Location.MapId;
+                    var viewing = mob.TamersViewing;
+
+                    for (int i = 0; i < seeds; i++)
+                    {
+                        int cx = aliveTargets[i].Location.X;
+                        int cy = aliveTargets[i].Location.Y;
+                        var zone = new MapAoeZone(
+                            casterHandler, skillIndex, cx, cy, radius,
+                            interval, tickCount,
+                            (z, map) =>
+                            {
+                                var hits = new List<MobAreaSkillPacket.Hit>();
+                                foreach (var c in map.Clients.ToList())
+                                {
+                                    var partner = c.Tamer?.Partner;
+                                    if (partner == null || !partner.Alive) continue;
+                                    if (partner.Location.MapId != mapId) continue;
+                                    if (UtilitiesFunctions.CalculateDistance(
+                                        z.CenterX, partner.Location.X,
+                                        z.CenterY, partner.Location.Y) > z.Radius) continue;
+
+                                    var newHp = partner.ReceiveDamage(dmg);
+                                    var hpRate = (byte)((long)partner.CurrentHp * 255L / System.Math.Max(1, (int)partner.HP));
+                                    bool died = newHp <= 0;
+                                    if (died) partner.Die();
+                                    hits.Add(new MobAreaSkillPacket.Hit(partner.GeneralHandler, dmg, hpRate, died));
+                                }
+                                if (hits.Count > 0)
+                                    map.BroadcastForTargetTamers(viewing,
+                                        new MobAreaSkillPacket(z.CasterHandler, z.SourceSkillIndex,
+                                            System.Array.Empty<int>(), hits).Serialize());
+                            });
+                        AddAoeZone(zone);
+                    }
+                    break;
+                }
+
+                // ─── CONTINUE_WIDE_ATTACK (eEFFECT_TYPE = 20) ──────────────
+                // Persistent caster-anchored AoE — damages everything in radius on each
+                // tick.  Mob moves → zone follows (re-reads caster position each tick).
+                // Bin fields: MaxValue = total duration ms (fallback 5000).  Tick once
+                // per 1000 ms.
+                case EffectContinueWide:
+                {
+                    int radius = MobSkillRadius(targetSkill);
+                    int lifetimeMs = targetSkill.MaxValue > 0 ? targetSkill.MaxValue : 5_000;
+                    int interval = 1_000;
+                    int ticks = System.Math.Max(1, lifetimeMs / interval);
+                    int dmg = RollMonsterSkillValue(targetSkill);
+                    int skillIndex = targetSkill.SkillId;
+                    int casterHandler = mob.GeneralHandler;
+                    int mapId = mob.Location.MapId;
+                    var viewing = mob.TamersViewing;
+                    var anchor = mob;
+
+                    BroadcastForTargetTamers(viewing,
+                        new MonsterSkillVisualPacket(casterHandler, skillIndex).Serialize());
+
+                    var zone = new MapAoeZone(
+                        casterHandler, skillIndex,
+                        mob.CurrentLocation.X, mob.CurrentLocation.Y, radius,
+                        interval, ticks,
+                        (z, map) =>
+                        {
+                            int cx = anchor.CurrentLocation.X, cy = anchor.CurrentLocation.Y;
+                            var hits = new List<MobAreaSkillPacket.Hit>();
+                            foreach (var c in map.Clients.ToList())
+                            {
+                                var partner = c.Tamer?.Partner;
+                                if (partner == null || !partner.Alive) continue;
+                                if (partner.Location.MapId != mapId) continue;
+                                if (UtilitiesFunctions.CalculateDistance(
+                                    cx, partner.Location.X, cy, partner.Location.Y) > z.Radius) continue;
+                                var newHp = partner.ReceiveDamage(dmg);
+                                var hpRate = (byte)((long)partner.CurrentHp * 255L / System.Math.Max(1, (int)partner.HP));
+                                bool died = newHp <= 0;
+                                if (died) partner.Die();
+                                hits.Add(new MobAreaSkillPacket.Hit(partner.GeneralHandler, dmg, hpRate, died));
+                            }
+                            if (hits.Count > 0)
+                                map.BroadcastForTargetTamers(viewing,
+                                    new MobAreaSkillPacket(casterHandler, skillIndex,
+                                        System.Array.Empty<int>(), hits).Serialize());
+                        });
+                    AddAoeZone(zone);
+                    break;
+                }
+
+                // ─── Region_Buff_Nesting (eEFFECT_TYPE = 23) ───────────────
+                // Ground-zone (mob-anchored) that ticks a debuff onto every in-zone
+                // partner.  No tick damage — purely the debuff carrier.  Doesn't restack
+                // the same buff (skip if target already has BuffId).  Bin fields:
+                //   EffectFactor[0]      = debuff BuffId (fallback to MinValue)
+                //   EffectFactorValue[0] = debuff duration ms (fallback default)
+                //   MaxValue             = zone lifetime ms (fallback 10s)
+                case EffectRegionBuffNesting:
+                {
+                    int buffId = targetSkill.EffectFactor.Length > 0 && targetSkill.EffectFactor[0] > 0
+                        ? targetSkill.EffectFactor[0]
+                        : (int)targetSkill.MinValue;
+                    if (buffId <= 0) break;
+                    int debuffMs = targetSkill.EffectFactorValue.Length > 0 && targetSkill.EffectFactorValue[0] > 0
+                        ? (int)System.Math.Min(targetSkill.EffectFactorValue[0], (uint)int.MaxValue)
+                        : DefaultMonsterCastBuffMs;
+                    int lifetimeMs = targetSkill.MaxValue > 0 ? targetSkill.MaxValue : 10_000;
+                    int interval = 1_000;
+                    int ticks = System.Math.Max(1, lifetimeMs / interval);
+                    int skillIndex = targetSkill.SkillId;
+                    int casterHandler = mob.GeneralHandler;
+                    int radius = MobSkillRadius(targetSkill);
+                    int mapId = mob.Location.MapId;
+                    var viewing = mob.TamersViewing;
+
+                    BroadcastForTargetTamers(viewing,
+                        new MonsterSkillVisualPacket(casterHandler, skillIndex).Serialize());
+
+                    var zone = new MapAoeZone(
+                        casterHandler, skillIndex,
+                        mob.CurrentLocation.X, mob.CurrentLocation.Y, radius,
+                        interval, ticks,
+                        (z, map) =>
+                        {
+                            foreach (var c in map.Clients.ToList())
+                            {
+                                var partner = c.Tamer?.Partner;
+                                if (partner == null || !partner.Alive) continue;
+                                if (partner.Location.MapId != mapId) continue;
+                                if (UtilitiesFunctions.CalculateDistance(
+                                    z.CenterX, partner.Location.X,
+                                    z.CenterY, partner.Location.Y) > z.Radius) continue;
+                                // Don't restack the same debuff every tick.
+                                if (partner.DebuffList.Buffs.Any(b => b.BuffId == buffId)) continue;
+                                partner.DebuffList.Add(DigimonDebuffModel.Create(buffId, skillIndex, 0, debuffMs));
+                                map.BroadcastForTargetTamers(viewing,
+                                    new AddBuffPacket(partner.GeneralHandler, buffId, skillIndex, 0, debuffMs).Serialize());
+                            }
+                        });
+                    AddAoeZone(zone);
+                    break;
+                }
+
+                // ─── RandomAoE (eEFFECT_TYPE = 27) ─────────────────────────
+                // Pick N random positions in a ring around the mob, deal damage to any
+                // partner inside any picked radius.  One-tick — no persistent zone needed
+                // for the damage itself, but the client expects a position-list packet
+                // (RecvAroundSkillAni ActiveType=4 path).  Since adding a new packet
+                // writer requires a matching client handler revisit, we shipphase 3 with
+                // per-target SkillHitPacket (already supported by every client) and
+                // accept the cosmetic miss — gameplay-correct, VFX is generic.  Bin:
+                //   TargetCount = number of impact points.
+                case EffectRandomAoE:
+                {
+                    int posCount = System.Math.Max(1, (int)targetSkill.TargetCount);
+                    int dmg = RollMonsterSkillValue(targetSkill);
+                    // RandomAoE per-impact radius — bin-driven.  Spread (placement jitter
+                    // around the mob) intentionally stays a server-side aesthetic constant;
+                    // it isn't carried by the bin.
+                    int radius = targetSkill.RangeUnits > 0 ? (int)targetSkill.RangeUnits : 600;
+                    int spread = 1500;
+                    int mapId = mob.Location.MapId;
+
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+
+                    var rng = System.Random.Shared;
+                    var positions = new List<(int x, int y)>(posCount);
+                    for (int i = 0; i < posCount; i++)
+                        positions.Add((
+                            mob.CurrentLocation.X + rng.Next(-spread, spread + 1),
+                            mob.CurrentLocation.Y + rng.Next(-spread, spread + 1)));
+
+                    var hits = new List<MobAreaSkillPacket.Hit>();
+                    foreach (var c in Clients.ToList())
+                    {
+                        var partner = c.Tamer?.Partner;
+                        if (partner == null || !partner.Alive) continue;
+                        if (partner.Location.MapId != mapId) continue;
+                        bool inAny = false;
+                        foreach (var pos in positions)
+                        {
+                            if (UtilitiesFunctions.CalculateDistance(
+                                pos.x, partner.Location.X, pos.y, partner.Location.Y) <= radius)
+                            { inAny = true; break; }
+                        }
+                        if (!inAny) continue;
+                        var newHp = partner.ReceiveDamage(dmg);
+                        var hpRate = (byte)((long)partner.CurrentHp * 255L / System.Math.Max(1, (int)partner.HP));
+                        bool died = newHp <= 0;
+                        if (died) partner.Die();
+                        hits.Add(new MobAreaSkillPacket.Hit(partner.GeneralHandler, dmg, hpRate, died));
+                    }
+                    if (hits.Count > 0)
+                        BroadcastForTargetTamers(mob.TamersViewing,
+                            new MobAreaSkillPacket(mob.GeneralHandler, targetSkill.SkillId,
+                                System.Array.Empty<int>(), hits).Serialize());
                     break;
                 }
 
@@ -620,7 +1174,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
                                     clientToModify.Partner.Location.Y);
 
 
-                                if (diff <= 1900)
+                                if (diff <= MobSkillRadius(targetSkill))
                                 {
                                     var newHp = clientToModify.Partner.ReceiveDamage(finalDamage);
 
@@ -679,6 +1233,20 @@ namespace DigitalWorldOnline.Commons.Models.Map
                         }
                     }
                     break;
+
+                default:
+                {
+                    int st = targetSkill.SkillType;
+                    bool emit = false;
+                    lock (_warnedUnhandledLock)
+                    {
+                        if (_warnedUnhandledMobSkillTypes.Add(st)) emit = true;
+                    }
+                    if (emit)
+                        System.Console.WriteLine(
+                            $"[MobSkillDispatch] Unhandled SkillType={st} (skillId={targetSkill.SkillId}, mobType={mob.Type}) — bin row falls through; add a case arm.");
+                    break;
+                }
             }
 
             mob.SetSkillCooldown(targetSkill.Cooldown);
@@ -723,7 +1291,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
                                     clientToModify.Location.Y);
 
 
-                                if (diff <= 1900)
+                                if (diff <= MobSkillRadius(targetSkill))
                                 {
                                     var newHp = clientToModify.ReceiveDamage(finalDamage);
 
@@ -769,6 +1337,20 @@ namespace DigitalWorldOnline.Commons.Models.Map
                         }
                     }
                     break;
+
+                default:
+                {
+                    int st = targetSkill.SkillType;
+                    bool emit = false;
+                    lock (_warnedUnhandledLock)
+                    {
+                        if (_warnedUnhandledMobSkillTypes.Add(st)) emit = true;
+                    }
+                    if (emit)
+                        System.Console.WriteLine(
+                            $"[MobSkillDispatch] Unhandled SkillType={st} (skillId={targetSkill.SkillId}, mobType={mob.Type}) — bin row falls through; add a case arm.");
+                    break;
+                }
             }
 
             mob.SetSkillCooldown(targetSkill.Cooldown);

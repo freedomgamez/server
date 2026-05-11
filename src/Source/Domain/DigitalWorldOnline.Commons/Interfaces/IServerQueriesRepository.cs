@@ -134,8 +134,8 @@ namespace DigitalWorldOnline.Commons.Interfaces
         Task<List<HatchConfigDTO>> GetHatchConfigsAsync();
 
         Task<List<FruitConfigDTO>> GetFruitConfigsAsync();
-        Task<List<MonsterSkillAssetDTO>> GetMonsterSkillSkillAssetsAsync();
-        Task<List<MonsterSkillInfoAssetDTO>> GetMonsterSkillInfoAssetsAsync();
+        // GetMonsterSkillSkillAssetsAsync + GetMonsterSkillInfoAssetsAsync retired —
+        // see Monster.bin migration plan §Step 10.  Both queries now served from Monster.bin.
         Task<List<TamerSkillAssetDTO>> GetTamerSkillAssetsAsync();
         Task<List<MonthlyEventAssetDTO>> GetMonthlyEventAssetsAsync();
         Task<List<AchievementAssetDTO>> GetAchievementAssetsAsync();

@@ -21,8 +21,8 @@ namespace DigitalWorldOnline.Infraestructure
         //public DbSet<CharacterBaseStatusAssetDTO> TamerBaseStatusAsset { get; set; }
         public DbSet<CharacterLevelStatusAssetDTO> TamerLevelStatusAsset { get; set; }
         public DbSet<DigimonSkillAssetDTO> DigimonSkillAsset { get; set; }
-        public DbSet<MonsterSkillAssetDTO> MonsterSkillAsset { get; set; }
-        public DbSet<MonsterSkillInfoAssetDTO> MonsterSkillInfoAsset { get; set; }
+        // MonsterSkillAsset + MonsterSkillInfoAsset DbSets retired (Monster.bin Step 10).
+        // Tables dropped via migration <RemoveAssetMonsterSkillTables>.
         public DbSet<SkillInfoAssetDTO> SkillInfoAsset { get; set; }
         public DbSet<MonthlyEventAssetDTO> MonthlyEvent{ get; set; }
         public DbSet<AchievementAssetDTO> AchievementAsset { get; set; }
@@ -60,8 +60,7 @@ namespace DigitalWorldOnline.Infraestructure
             builder.ApplyConfiguration(new MapRegionListAssetConfiguration());
             builder.ApplyConfiguration(new MapRegionAssetConfiguration());
             builder.ApplyConfiguration(new DigimonSkillAssetConfiguration());
-            builder.ApplyConfiguration(new MonsterSkillAssetConfiguration());
-            builder.ApplyConfiguration(new MonsterSkillInfoAssetConfiguration());
+            // MonsterSkill[Info]AssetConfiguration retired — Monster.bin Step 10.
             builder.ApplyConfiguration(new SkillInfoAssetConfiguration());
             builder.ApplyConfiguration(new SealDetailAssetConfiguration());
             builder.ApplyConfiguration(new EvolutionAssetConfiguration());

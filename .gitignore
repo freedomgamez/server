@@ -409,3 +409,8 @@ HOST_SPLIT_PLAN.md
 src/Tools/Discord/
 src/Tools/DataImporter/XMLs/
 appsettings.Development.json
+
+# Local AI coding-assistant artifacts (aider per-repo state).  Never commit.
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v4/

@@ -34,6 +34,8 @@ namespace DigitalWorldOnline.GameHost
             stopwatch.Start();
 
             map.UpdateMapMobs();
+            map.TickAoeZones();   // Phase 3 — ATTACH_SEED / Region_Buff / RandomAoE / CONTINUE_WIDE.
+            map.TickMobStatMods();// Phase 4 — GROWTH / BERSERK expiry sweep.
 
             // Per-tamer batches: when multiple mobs become visible to the same tamer in the
             // same cycle (typical on map enter), batch them into a single LoadMobsPacket
@@ -171,12 +173,72 @@ namespace DigitalWorldOnline.GameHost
 
                 mob.SetNextAction();
             }
+
+            DrainPendingSummons(map);
+
             stopwatch.Stop();
 
             var totalTime = stopwatch.Elapsed.TotalMilliseconds;
 
             if (totalTime >= 1000)
                 Console.WriteLine($"MonstersOperation ({map.Mobs.Count}): {totalTime}.");
+        }
+
+        /// <summary>
+        /// Phase-5 drain: convert PendingSummon entries queued by SUMMON_MONSTER (13) /
+        /// SummonPos (31) into <see cref="SummonMobModel"/> instances built from the
+        /// Monster.bin catalog and register them via the existing <see cref="AddSummonMobs"/>
+        /// path (handler allocation + spawn broadcast).  Catalog miss is logged once.
+        /// </summary>
+        private void DrainPendingSummons(GameMap map)
+        {
+            var pending = map.DrainPendingSummons();
+            if (pending.Count == 0) return;
+
+            foreach (var p in pending)
+            {
+                if (!_assets.Monster.Data.ByType.TryGetValue(p.MonsterTypeId, out var rec))
+                {
+                    _logger.Warning("SUMMON_MONSTER: type {Type} not in Monster.bin catalog (mob {Caster})",
+                        p.MonsterTypeId, p.CasterMobId);
+                    continue;
+                }
+
+                var rng = Random.Shared;
+                for (int i = 0; i < p.Count; i++)
+                {
+                    // Spread spawns in a small ring so they don't stack on the anchor point.
+                    int jx = i == 0 ? 0 : rng.Next(-300, 301);
+                    int jy = i == 0 ? 0 : rng.Next(-300, 301);
+
+                    var summon = new SummonMobModel
+                    {
+                        Id = map.SummonMobs.Count + 1 + i,
+                        Type = rec.Type,
+                        Model = rec.ModelId,
+                        Name = string.Empty,
+                        Level = (byte)Math.Min(rec.Level, byte.MaxValue),
+                        ViewRange = rec.Sight,
+                        HuntRange = rec.HuntRange,
+                        ATValue = rec.AttPower,
+                        ASValue = rec.AttSpeed,
+                        ARValue = rec.AttRange,
+                        DEValue = rec.DefPower,
+                        EVValue = rec.Evasion,
+                        HPValue = rec.Hp,
+                        HTValue = rec.HitRate,
+                        MSValue = rec.MoveSpeed,
+                        WSValue = rec.WalkSpeed,
+                        CTValue = rec.CriticalRate,
+                        DSValue = rec.Ds,
+                    };
+                    summon.SetLocation((short)map.MapId, p.X + jx, p.Y + jy);
+                    summon.SetDuration();
+                    if (p.CasterTargetTamerHandler != 0)
+                        summon.SetTargetSummonHandle(p.CasterTargetTamerHandler);
+                    AddSummonMobs((short)map.MapId, summon);
+                }
+            }
         }
 
         private void MobsOperation(GameMap map, MobConfigModel mob)
@@ -697,11 +759,30 @@ namespace DigitalWorldOnline.GameHost
 
             QuestDropReward(map, mob);
 
+            // Bin/DB boss-class divergence audit (Monster Step 9).  DB says raid when
+            // mob.Class == 8 (custom server convention).  Monster.bin §1 IsBoss covers
+            // class ∈ {3, 4, 6} (the v487 client author's "boss" set per Monster.h:91).
+            // Log once per mob type when DB drives a raid reward but bin disagrees, or
+            // vice versa — surfaces tuning drift without auto-correcting either side.
+            if (_assets.Monster.IsLoaded
+                && _assets.Monster.Data.ByType.TryGetValue(mob.Type, out var rec))
+            {
+                bool dbRaid = mob.Class == 8;
+                bool binBoss = rec.IsBoss;
+                if (dbRaid != binBoss && _bossDivergenceLogged.Add(mob.Type))
+                    _logger.Debug(
+                        "BinDbBossDivergence: mob {Type} db.Class={DbClass} (dbRaid={DbRaid}) " +
+                        "vs bin.Class={BinClass} (binIsBoss={BinBoss}) — tuning drift",
+                        mob.Type, mob.Class, dbRaid, rec.Class, binBoss);
+            }
+
             if (mob.Class == 8)
                 RaidReward(map, mob);
             else
                 DropReward(map, mob);
         }
+
+        private static readonly System.Collections.Generic.HashSet<int> _bossDivergenceLogged = new();
 
         private void ExperienceReward(GameMap map, MobConfigModel mob)
         {

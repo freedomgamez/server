@@ -317,6 +317,26 @@ namespace DigitalWorldOnline.Commons.Utils
                     ).ToUnixTimeSeconds();
         }
 
+        // ─── Monster.bin-driven hit-rate floor (§2 MonsterHit map) ──────────
+        // CsMonsterMng::GetMonsterHit(nLv) returns the minimum hit-rate a mob is
+        // guaranteed against a partner of level nLv (0..99).  The v487 client doesn't
+        // consult this directly — it's a *server* curve for partner-evasion bands.
+        // Used in MobConfigModelBehavior.CalcularProbabilidadeAcerto: when the computed
+        // hit % would drop below the bin floor, we clamp up.  Returns 0 (no floor) when
+        // the bin isn't loaded — preserves the pre-bin behaviour for unit tests.
+        private static IReadOnlyDictionary<int, int>? _monsterHitFloor;
+
+        public static void RegisterMonsterHitFloor(IReadOnlyDictionary<int, int> source)
+        {
+            _monsterHitFloor = source;
+        }
+
+        public static int GetMonsterHitFloor(int targetLevel)
+        {
+            if (_monsterHitFloor is null) return 0;
+            return _monsterHitFloor.TryGetValue(targetLevel, out var f) ? f : 0;
+        }
+
         // ─── Nature.bin-driven combat multipliers ───────────────────────────
         // Populated at Game.Host boot via RegisterNatureSource(...).  Until then the
         // helpers fall back to a hardcoded binary advantage table (the pre-bin behaviour)

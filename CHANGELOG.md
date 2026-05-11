@@ -2,6 +2,95 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Monster.bin — every `eEFFECT_TYPE` value now drives real gameplay (Phases 3–7 + Gaps + Steps 9–10)
+
+The 27045-only `SkillTarget` block — which previously routed every mob skill regardless of bin data — is gone.  21 distinct `eEFFECT_TYPE` values now dispatch through dedicated handlers, AoE radii are bin-driven from `MonsterSkillTerms.s_nRange`, BERSERK reflects damage back to attackers, GROWTH stacks DP/AP factors against snapshotted baselines, mob-summoning skills queue spawns through the existing `AddSummonMobs` broadcast path, and unrecognised SkillTypes log a once-per-id warning so future bin values surface visibly.
+
+Phases 1 and 2 (`f41805f`, `3293831`) shipped earlier; this batch covers Phases 3–7 plus Gaps #3/#4 plus Steps 9 and 10.
+
+### Phase 3 — persistent AoE zones (`MapAoeZone`)
+
+- **`Domain/.../Models/Maps/MapAoeZone.cs`** (new) — generic per-map ground zone carrying `CasterHandler`, `SourceSkillIndex`, `CenterX/Y`, `Radius`, `ExpiresAt`, `NextTick`, `TickIntervalMs`, `TicksRemaining`, plus an `Action<MapAoeZone, GameMap> OnTick` closure.  `Tick(map)` returns `true` when the zone should be removed.
+- **`GameMapMobBehavior`** — added `_aoeZones` list + lock, `AddAoeZone()`, and `TickAoeZones()` which the map's tick loop calls every cycle.
+- **`MapServerMonsterOperation.MonsterOperation`** — calls `map.TickAoeZones()` right after `map.UpdateMapMobs()`.
+- **`Combat/MobAreaSkillPacket`** (already shipped in Phase 2 — packet ID `pSkill::AroundSkill` = 1110) now reused by the new zones for per-tick damage broadcasts.
+
+Four case dispatchers built on top:
+
+| Value | Effect | Behavior |
+|---|---|---|
+| 18 | `ATTACH_SEED` (35 rows) | Drop N seed-zones at target positions, each ticks damage for `EffectFactorValue[0]` ms with `EffectFactor[0]` ticks. |
+| 20 | `CONTINUE_WIDE_ATTACK` (44 rows) | Caster-anchored AoE that ticks every 1 s for `MaxValue` ms (default 5 s); re-reads caster position each tick so it follows. |
+| 23 | `Region_Buff_Nesting` (173 rows) | Ground zone, mob-anchored, ticks `EffectFactor[0]` debuff onto every in-zone partner.  No re-stacking — skips targets that already carry the buff id. |
+| 27 | `RandomAoE` (28 rows) | Picks N positions in a ring around the caster, one-tick damage to partners in any of them.  Per-impact radius is bin-driven (`Terms[skill.RangeId].Range`). |
+
+### Phase 4 — self stat-mod (GROWTH 14 + BERSERK 19)
+
+- **`MobConfigModel`** — added `BaseATSnapshot` / `BaseDESnapshot` / `GrowExpiresAt` / `Berserk` / `BerserkExpiresAt` / `BerserkReflectDamage` fields, plus `EnsureStatSnapshot()` + `RestoreBaseStats()` helpers so revert returns to the *pre-buff* stats exactly (re-applying GROWTH adds on top of base, not the prior buffed value).
+- **GROWTH (14)** — `mob.GrowStack` capped at `MaxValue`; for each `EffectFactor[i]` matches `29 = AP_INCREASE` or `21 = DP_INCREASE` and adds `BaseAT × EffectFactorValue[i]% × stack` (or DE).  Factor `41 = SCALE_INCREASE` is client-side VFX only — no server stat impact.  30 s default expiry.
+- **BERSERK (19)** — same factor math but no stacking (one-shot).  `MaxValue` is the duration; `MinValue` is the reflect damage that pings back to attackers.
+- **`MobConfigModelBehavior.ReceiveDamage`** — now invokes `ApplyBerserkReflectTo(attackerPartner)` when the mob is in Berserk window.  Attacker resolved via the mob's aggro list (`TargetTamers` entry whose `Id == tamerId`).  All 8 `PartnerSkillPacketProcessor` damage call sites get reflect for free without per-site edits.
+- **`GameMapMobBehavior.TickMobStatMods()`** — sweeps expired GROWTH / BERSERK each tick.  When both modifiers are off the mob calls `RestoreBaseStats()`.  Hooked into `MapServerMonsterOperation` alongside `TickAoeZones`.
+
+### Phase 5 — summon-during-combat (SUMMON_MONSTER 13, CALL_UP 15, SummonPos 31)
+
+- **`Domain/.../Models/Maps/PendingSummon.cs`** (new) — `{ MonsterTypeId, X, Y, Count, CasterMobId, CasterTargetTamerHandler }` queue entry.  Domain layer can't see the catalog (`MonsterBinLoader`) or the broadcast-aware spawn API (`_mapServer.AddSummonMobs`), so the dispatcher enqueues and Distribution drains.
+- **`GameMapMobBehavior`** — `_pendingSummons` queue + lock, `EnqueueSummon()` and `DrainPendingSummons()`.
+- **`MapServerMonsterOperation.DrainPendingSummons`** — runs after the mob loop each tick.  Looks up `_assets.Monster.Data.ByType[id]` (the bin catalog — see Step 9 below for `AssetsLoader.Monster` exposure), builds a `SummonMobModel` directly from the `MonsterRecord` (no DB lookup), spawns each child with a 600-unit jitter from the anchor point, calls `AddSummonMobs((short)map.MapId, summon)`.  Catalog miss logs a `Warning` once.
+- **SUMMON_MONSTER (13)** — `MinValue = monster type to spawn`, `TargetCount = count`.  Anchor by `ActiveType`: 0 = self, 1 = current target, 2 = falls back to self (no explicit coord in row).
+- **CALL_UP (15)** — "MonsterGather": rallies up to `TargetCount` nearby living mobs to engage the caster's target via `StartBattle()`.  Range bin-driven from Terms (2000-unit fallback when row has no Terms).
+- **SummonPos (31)** — same machinery as SUMMON_MONSTER anchored at caster.
+
+### Phase 6 — Qinglongmon chain lightning (ChainBounce 28)
+
+- **`Combat/MobChainSkillPacket`** (new) — packet ID `pGameTwo::SkillHitEffect` = **16027** (auto-incremented from `nScope::GameTwo=16000`, 27 entries deep).  Wire format mirrors client handler `cCliGame::RecvRaidChainSkill` (`cCliGameSkill.cpp:2826-2889`): `u4 caster, u4 skillIdx, u2 subtype=1, n4 chainCount, u4 × chainCount targetUIDs`.  VFX-only — damage is broadcast separately via `SkillHitPacket` per link.
+- **Dispatcher** — starts at caster's current target, bounces to the nearest alive partner within `Terms.Range` (1500-unit fallback) not already in the chain, up to `TargetCount` links.  Each link takes a fresh `RollMonsterSkillValue` damage roll.
+
+### Phase 7 — unhandled-effect warning
+
+- **`GameMapMobBehavior.SkillTarget` default arm** — if a bin row has a `SkillType` not covered by any case, emit a once-per-id `Console.WriteLine("[MobSkillDispatch] Unhandled SkillType=X (skillId=Y, mobType=Z)")`.  Static `HashSet` keyed by SkillType ensures the spam stays bounded.  This catches anything we missed (e.g. effect 24 `Range_Buff_Nesting` which the v487 client has no consumer for).
+
+### Gap #3 — Terms-driven AoE shape (was hardcoded `<= 1900`)
+
+- **`MonsterSkillInfoAssetModel`** — added `RangeUnits` / `RangeDirection` / `RangeTargetingType` / `RangeRefCode` fields (denormalised from `Monster.bin §4 TermsByIndex`).
+- **`AssetsLoader.LoadAssets`** — after `MonsterSkillInfo` loads, joins each row's `RangeId` against `_monster.Data.TermsByIndex` and populates those four fields.  Skips zero `RangeId` (means no Terms).
+- **`GameMapMobBehavior.MobSkillRadius(skill)`** — returns `skill.RangeUnits` when non-zero, falls back to the legacy 1900-unit gate.  Used by every AoE distance check in `SkillTarget` (DS drain, BUFF_OCCURE target loop, SingleStack target, ASSEMBLE/DISPERSE marks, CONTINUE_WIDE radius, Region_Buff_Nesting radius, RandomAoE radius, CALL_UP rally range, ChainBounce bounce range, and both HP_VAL_DECREASE paths).
+- **ATTACH_SEED + RandomAoE** keep their own bin-driven `radius = RangeUnits > 0 ? RangeUnits : <fallback>` because the per-impact radius is conceptually distinct from the AoE-style "distance gate" the helper assumes.
+
+### Gap #4 — BERSERK reflect actually wired
+
+Covered above under Phase 4 (`ApplyBerserkReflectTo` inside `ReceiveDamage`).
+
+### Monster Step 9 — catalog hooks (boss-class divergence + hit-rate floor)
+
+- **`AssetsLoader`** — added `MonsterBinLoader` to the constructor and exposed `Monster` property so Distribution-layer code (drain step + reward gates) can read the bin catalog.  Routine.Host's DI graph also gains `MonsterBinLoader` so `AssetsLoader` resolves there.
+- **`MapServerMonsterOperation.ItemsReward`** — once per mob type, emits a `_logger.Debug("BinDbBossDivergence: ...")` when DB `Class == 8` (raid reward gate) disagrees with bin `IsBoss = class ∈ {3,4,6}`.  Doesn't auto-correct either side — surfaces tuning drift between the per-map DB rows and the v487 catalog.
+- **`Utils.RegisterMonsterHitFloor` / `GetMonsterHitFloor`** — registers `Monster.bin §2 HitByLevel` map; queried during `MobConfigModelBehavior.CalcularProbabilidadeAcerto` to clamp the computed hit % up to the bin's per-level floor.  Zero when bin isn't loaded (preserves pre-bin behaviour for tests).
+- **`Game.Host/Program.cs`** — wires `UtilitiesFunctions.RegisterMonsterHitFloor(monster.HitByLevel)` at boot, right next to the existing `RegisterNatureSource`.
+
+### Monster Step 10 — drop the dead `Asset_MonsterSkill*` tables
+
+- Removed `IServerQueriesRepository.GetMonsterSkillSkillAssetsAsync` / `GetMonsterSkillInfoAssetsAsync` declarations and their impls in `ServerQueriesRepository`.
+- Removed `_context.MonsterSkillAsset` / `MonsterSkillInfoAsset` DbSets from `DatabaseContext.Asset.cs`.
+- Deleted `MonsterSkillAssetConfiguration.cs` + `MonsterSkillInfoAssetConfiguration.cs` (EF configs).
+- New migration **`20260511191507_RemoveAssetMonsterSkillTables`** drops `Asset_MonsterSkill` + `Asset_MonsterSkillInfo`.  `Down()` rebuilds them (mirrors the Initial migration's column shape).
+
+### Cleanup — strip diagnostic logging from the memory-skill / skill-up paths
+
+Per-cast trace logs that were useful during the initial Phase 6 / Step 8 build but turn into spam at production volumes:
+
+- **`MemorySkillUsePacketProcessor`** — removed 5 `_logger.Information`/`_logger.Verbose` lines (RX dump, cooldown still-active, dead-mob skip, resolved-target trace, self-cast trace, instant-heal result, buff-applied result).  Kept all `_logger.Warning` lines (anti-cheat + error paths).
+- **`MemorySkillRemovePacketProcessor`** — removed the per-delete `_logger.Information` trace.
+- **`DigimonSkillUpPacketProcessor`** — removed two `_logger.Information` lines for normal user-input rejection (max-level / insufficient SP); those are purely client-side display concerns.
+
+### Numbers
+
+- **21 of 31** `eEFFECT_TYPE` values now dispatched (10 phases × ~2-3 effects each).  Remaining are 0-row in v487 + value 24 `Range_Buff_Nesting` which the client has no consumer for (falls into the warning log).
+- **Effective coverage:** ~99 % of bin skill rows (the per-row count distribution heavily favours the handled values; 22 `Single_StackDeBuff_Attack` alone is 625 rows = ~30 % of the bin).
+- **2 dead DB tables retired** + matching EF migration.
+
+---
+
 ## Memory skills — full `pSkill::*SkillChip` pipeline (1118–1122)
 
 Per-evolution memory-skill chips end-to-end: register (chip → skill on evolution), delete (chip off), cast (damage / buff / instant-heal), cooldown UI, persistence across relog. The v487 client already had the full chip UI and the four send packets (`AddSkillChip` 1118 / `RemoveSkillChip` 1119 / `UseSkillChip` 1120 / `ResultSkillChip` 1122); server-side support was the missing half.

@@ -68,12 +68,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             var removed = await _sender.Send(new RemoveMemorySkillCommand(evolution.Id, skillCode));
             if (removed)
-            {
                 evolution.MemorySkills.Remove(owned);
-                _logger.Information(
-                    "Tamer {TamerId} deleted memory skill {SkillId} from evolution {EvoType}.",
-                    client.TamerId, skillCode, evolution.Type);
-            }
         }
     }
 }

@@ -76,10 +76,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             // (1) Max level reached — bail before consuming anything.  Mirrors `IncreaseSkillLevel` guard.
             if (skillEntry.CurrentLevel >= skillEntry.MaxLevel)
-            {
-                _logger.Information($"SkillUp: tamer {client.TamerId} slot {skillSlot} already at MaxLevel {skillEntry.MaxLevel}");
                 return;
-            }
 
             // (2) Digimon level vs skill UnlockLevel (bin's s_nLimitLevel) — `DigimonSkill.cpp:65`.
             if (skillAsset.SkillInfo != null && client.Partner.Level < skillAsset.SkillInfo.UnlockLevel)
@@ -112,10 +109,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 return;
             }
             if (evolution.SkillPoints < cost)
-            {
-                _logger.Information($"SkillUp: tamer {client.TamerId} has {evolution.SkillPoints} SP, needs {cost}");
                 return;
-            }
 
             // All gates pass — commit.
             evolution.DecreaseSkillPoints(cost);

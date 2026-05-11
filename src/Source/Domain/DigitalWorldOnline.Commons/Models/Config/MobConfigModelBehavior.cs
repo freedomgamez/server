@@ -68,6 +68,11 @@ namespace DigitalWorldOnline.Commons.Models.Config
 
                 double adjustedPercent = CalcularProbabilidadeAcerto(AttackerHitRate, Level, Target.Level, TargetEvasion, attributeAdvantage);
 
+                // Monster.bin §2 hit-rate floor — clamp up to the bin curve when the
+                // computed % would drop below.  Zero when the bin isn't loaded.
+                int floor = DigitalWorldOnline.Commons.Utils.UtilitiesFunctions.GetMonsterHitFloor(Target.Level);
+                if (floor > 0 && adjustedPercent < floor) adjustedPercent = floor;
+
                 if (adjustedPercent <= 1.0)
                     adjustedPercent = 0;
 
@@ -310,7 +315,39 @@ namespace DigitalWorldOnline.Commons.Models.Config
             CurrentHP -= damage;
             if (CurrentHP < 0) CurrentHP = 0;
 
+            // BERSERK reflect — fire-and-forget against the attacker's partner.  Resolve
+            // attacker via the mob's aggro list (TargetTamers entry whose tamer id matches
+            // the attribution we just recorded above).  Callers that want UI feedback for
+            // the reflected damage should observe the partner's HP delta and emit their
+            // own SkillHitPacket — the reflect runs at every damage site for free.
+            if (Berserk && BerserkReflectDamage > 0 && DateTime.Now < BerserkExpiresAt)
+            {
+                CharacterModel? attackerTamer = null;
+                foreach (var t in TargetTamers)
+                    if (t.Id == tamerId) { attackerTamer = t; break; }
+                ApplyBerserkReflectTo(attackerTamer?.Partner);
+            }
+
             return CurrentHP;
+        }
+
+        /// <summary>
+        /// BERSERK reflect (Phase 4 — eEFFECT_TYPE = 19).  When the mob is in berserk
+        /// state, every hit it takes mirrors a fixed amount of damage (bin row's
+        /// <c>MinValue</c>) back to the attacking partner.  Call this immediately after
+        /// <see cref="ReceiveDamage"/> at every player→mob damage site.  Returns the
+        /// damage actually applied so the caller can broadcast a <c>SkillHitPacket</c>
+        /// or equivalent UI feedback.  Zero when reflect is disabled or attacker is null.
+        /// </summary>
+        public int ApplyBerserkReflectTo(DigimonModel? attacker)
+        {
+            if (!Berserk || BerserkReflectDamage <= 0) return 0;
+            if (attacker == null || !attacker.Alive) return 0;
+            if (DateTime.Now >= BerserkExpiresAt) return 0;
+            var reflect = BerserkReflectDamage;
+            var newHp = attacker.ReceiveDamage(reflect);
+            if (newHp <= 0) attacker.Die();
+            return reflect;
         }
 
         public void UpdateCurrentHp(int newValue) => CurrentHP = newValue;

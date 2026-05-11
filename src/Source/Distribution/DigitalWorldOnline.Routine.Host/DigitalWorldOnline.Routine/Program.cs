@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.GameAssets.Mapping;
 using DigitalWorldOnline.Application.Admin.Repositories;
 using DigitalWorldOnline.Application.Extensions;
@@ -78,6 +79,10 @@ namespace DigitalWorldOnline.Routine
                     services.AddSingleton(ConfigureLogger(context.Configuration));
                     services.AddHostedService<RoutineServer>();
                     services.AddTransient<Mediator>();
+                    // MonsterBinLoader is required by AssetsLoader's constructor (catalog
+                    // access for the bin-driven SUMMON_MONSTER path in Game.Host).  Routine
+                    // doesn't consume the catalog but the DI graph still needs it satisfied.
+                    services.AddSingleton<MonsterBinLoader>();
                     services.AddSingleton<AssetsLoader>();
                     services.AddMediatR(
                         typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly,

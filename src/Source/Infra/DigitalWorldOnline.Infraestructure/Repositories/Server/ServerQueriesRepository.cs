@@ -526,19 +526,9 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Server
                 .ToListAsync();
         }
 
-        public async Task<List<MonsterSkillAssetDTO>> GetMonsterSkillSkillAssetsAsync()
-        {
-            return await _context.MonsterSkillAsset
-                 .AsNoTracking()
-                 .ToListAsync();
-        }
-
-        public async Task<List<MonsterSkillInfoAssetDTO>> GetMonsterSkillInfoAssetsAsync()
-        {
-            return await _context.MonsterSkillInfoAsset
-                 .AsNoTracking()
-                 .ToListAsync();
-        }
+        // GetMonsterSkillSkillAssetsAsync / GetMonsterSkillInfoAssetsAsync retired —
+        // both queries are served from Monster.bin (Application/.../MonsterSkillAssetsQueryHandler
+        // + MonsterSkillInfoAssetsQueryHandler).  See project_monster_bin_plan.md Step 10.
 
         public async Task<List<TamerSkillAssetDTO>> GetTamerSkillAssetsAsync()
         {

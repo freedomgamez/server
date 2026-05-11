@@ -154,6 +154,7 @@ namespace DigitalWorldOnline.Game
             // data (CsAttributeTypeUI / CsNatureTypeUI: icon paths + screen coordinates)
             // loaded by client DigimonMng, not NatureMng.  No server consumer.
             DigitalWorldOnline.Commons.Utils.UtilitiesFunctions.RegisterNatureSource(nature);
+            DigitalWorldOnline.Commons.Utils.UtilitiesFunctions.RegisterMonsterHitFloor(monster.HitByLevel);
 
             // DMBase.bin section 7 MaxShareStash drives the AccountWarehouse default size
             // so the server matches what v487 client expects (Warehouse.cpp:81 reads s_nMaxShareStash).

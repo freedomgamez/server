@@ -1,4 +1,5 @@
 ﻿using AutoMapper;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.GameAssets.Queries;
 using DigitalWorldOnline.Commons.DTOs.Assets;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
@@ -15,7 +16,11 @@ namespace DigitalWorldOnline.Application.GameAssets
     {
         private readonly ISender _sender;
         private readonly IMapper _mapper;
+        private readonly MonsterBinLoader _monster;
         private bool? _loading;
+
+        /// <summary>Catalog access for runtime mob factory (SUMMON_MONSTER, CALL_UP, SummonPos).</summary>
+        public MonsterBinLoader Monster => _monster;
 
         public bool Loading => _loading == null || _loading.Value;
 
@@ -60,10 +65,12 @@ namespace DigitalWorldOnline.Application.GameAssets
       
         public AssetsLoader(
             ISender sender,
-            IMapper mapper)
+            IMapper mapper,
+            MonsterBinLoader monster)
         {
             _sender = sender;
             _mapper = mapper;
+            _monster = monster;
         }
 
         public AssetsLoader Load()
@@ -118,6 +125,23 @@ namespace DigitalWorldOnline.Application.GameAssets
             BuffInfo.ForEach(buff => { buff.SetSkillInfo(SkillCodeInfo.FirstOrDefault(x => x.SkillCode == buff.SkillCode || x.SkillCode == buff.DigimonSkillCode)); });
             DigimonSkillInfo.ForEach(skill => { skill.SetSkillInfo(SkillInfo.FirstOrDefault(x => x.SkillId == skill.SkillId)); });
             MonsterSkill.ForEach(skill => { skill.SetSkillInfo(MonsterSkillInfo.FirstOrDefault(x => x.SkillId == skill.SkillId)); });
+
+            // Terms join — resolve each skill's RangeId against Monster.bin §4 so the
+            // dispatcher can read the bin's actual AoE radius / shape instead of falling
+            // back to hardcoded constants.  Zero RangeId stays at zero (means no Terms).
+            if (_monster?.IsLoaded == true)
+            {
+                var terms = _monster.Data.TermsByIndex;
+                foreach (var s in MonsterSkillInfo)
+                {
+                    if (s.RangeId == 0) continue;
+                    if (!terms.TryGetValue(s.RangeId, out var t)) continue;
+                    s.RangeUnits = t.Range;
+                    s.RangeDirection = t.Direction;
+                    s.RangeTargetingType = t.TargetingType;
+                    s.RangeRefCode = t.RefCode;
+                }
+            }
             SealInfo = SealInfo.OrderByDescending(x => x.RequiredAmount).ToList();
             QuestItemList = ItemInfo.Where(x => x.Type == 80 || x.Type == 85).Select(x => x.ItemId).ToList();
             DailyQuestList = Quest.Where(x => x.QuestType == QuestTypeEnum.DailyQuest).Select(x => (short)x.QuestId).ToList();

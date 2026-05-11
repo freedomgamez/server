@@ -156,6 +156,29 @@ namespace DigitalWorldOnline.Commons.Models.Config
         public Location InitialLocation { get; private set; }
         public byte MoveCount { get; private set; }
         public byte GrowStack { get; set; }
+
+        // Phase-4 stat-mod state — GROWTH (14) and BERSERK (19) snapshot the base
+        // AT/DE values on first apply so the revert path returns to the pre-buff
+        // numbers exactly (stacking GROWTH adds on top of the base, not the prior).
+        public int BaseATSnapshot { get; private set; }
+        public int BaseDESnapshot { get; private set; }
+        public DateTime GrowExpiresAt { get; set; }
+        public bool Berserk { get; set; }
+        public DateTime BerserkExpiresAt { get; set; }
+        public int BerserkReflectDamage { get; set; }
+
+        public void EnsureStatSnapshot()
+        {
+            if (BaseATSnapshot == 0) BaseATSnapshot = ATValue;
+            if (BaseDESnapshot == 0) BaseDESnapshot = DEValue;
+        }
+
+        public void RestoreBaseStats()
+        {
+            if (BaseATSnapshot > 0) SetAT(BaseATSnapshot);
+            if (BaseDESnapshot > 0) SetDE(BaseDESnapshot);
+        }
+
         public byte DisposedObjects { get; set; }
         public bool InBattle { get; private set; }
         public bool AwaitingKillSpawn { get; private set; }
