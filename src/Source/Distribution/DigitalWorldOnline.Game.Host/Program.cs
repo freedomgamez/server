@@ -109,7 +109,6 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<CashShopBinLoader>();
                     services.AddSingleton<SkillBinLoader>();
                     services.AddSingleton<NatureBinLoader>();
-                    services.AddSingleton<NewElementBinLoader>();
 
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
                     services.AddSingleton<IProcessor, GamePacketProcessor>();
@@ -144,11 +143,15 @@ namespace DigitalWorldOnline.Game
             var cashShop = host.Services.GetRequiredService<CashShopBinLoader>().Load();
             var skill = host.Services.GetRequiredService<SkillBinLoader>().Load();
             var nature = host.Services.GetRequiredService<NatureBinLoader>().Load();
-            var newElement = host.Services.GetRequiredService<NewElementBinLoader>().Load();
-            // Element-vs-element + attribute-vs-attribute combat multipliers come from these
-            // bins — accessed by Utils.GetElementDeltaPercent / GetAttributePoint.  New_Element
-            // is the v487-current matrix and is preferred over Nature for combat math.
-            DigitalWorldOnline.Commons.Utils.UtilitiesFunctions.RegisterNatureSource(primary: newElement, fallback: nature);
+            // Element-vs-element + attribute-vs-attribute combat multipliers come from
+            // Nature.bin — accessed via Utils.GetElementDelta / GetAttributePoint, which
+            // drive the boolean HasElementAdvantage / HasAttributeAdvantage extension
+            // methods used by every combat call site.
+            //
+            // NOTE: New_Element.bin (in Pack03) is NOT a combat matrix — it's UI-only
+            // data (CsAttributeTypeUI / CsNatureTypeUI: icon paths + screen coordinates)
+            // loaded by client DigimonMng, not NatureMng.  No server consumer.
+            DigitalWorldOnline.Commons.Utils.UtilitiesFunctions.RegisterNatureSource(nature);
 
             // DMBase.bin section 7 MaxShareStash drives the AccountWarehouse default size
             // so the server matches what v487 client expects (Warehouse.cpp:81 reads s_nMaxShareStash).

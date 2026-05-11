@@ -317,7 +317,7 @@ namespace DigitalWorldOnline.Commons.Utils
                     ).ToUnixTimeSeconds();
         }
 
-        // ─── Nature.bin / New_Element.bin driven combat multipliers ─────────
+        // ─── Nature.bin-driven combat multipliers ───────────────────────────
         // Populated at Game.Host boot via RegisterNatureSource(...).  Until then the
         // helpers fall back to a hardcoded binary advantage table (the pre-bin behaviour)
         // so unit tests / Character.Host / Routine.Host that don't load the bin still work.
@@ -325,16 +325,14 @@ namespace DigitalWorldOnline.Commons.Utils
         private static NatureData? _natureSource;
 
         /// <summary>
-        /// Register the primary (preferred) and optional fallback nature matrices.
-        /// Called once at Game.Host boot.  Subsequent calls overwrite (used by tooling).
+        /// Register the v487 element-vs-element + attribute-vs-attribute combat matrices.
+        /// Called once at Game.Host boot from <c>Program.cs</c>.  Subsequent calls overwrite
+        /// (used by tooling / tests).
         /// </summary>
-        public static void RegisterNatureSource(NatureData primary, NatureData? fallback = null)
+        public static void RegisterNatureSource(NatureData source)
         {
-            _natureSource = primary;
-            _natureFallback = fallback;
+            _natureSource = source;
         }
-
-        private static NatureData? _natureFallback;
 
         /// <summary>
         /// Percent delta to apply to base damage when an attacker of <paramref name="hitter"/>
@@ -344,17 +342,8 @@ namespace DigitalWorldOnline.Commons.Utils
         /// </summary>
         public static int GetElementDelta(this DigimonElementEnum hitter, DigimonElementEnum target)
         {
-            if (_natureSource is not null)
-            {
-                short v = _natureSource.GetElementDelta(hitter, target);
-                if (v != 0) return v;
-                // 0 from primary may legitimately mean "no bonus" — only fall back when
-                // the primary doesn't carry the row at all.
-                if (_natureSource.ElementDeltaPercent.ContainsKey(hitter)) return 0;
-            }
-            if (_natureFallback is not null)
-                return _natureFallback.GetElementDelta(hitter, target);
-            return 0;
+            if (_natureSource is null) return 0;
+            return _natureSource.GetElementDelta(hitter, target);
         }
 
         /// <summary>
@@ -363,16 +352,8 @@ namespace DigitalWorldOnline.Commons.Utils
         /// </summary>
         public static int GetAttributePoint(this DigimonAttributeEnum hitter, DigimonAttributeEnum target, AttributeCompare cmp = AttributeCompare.Attack)
         {
-            if (_natureSource is not null)
-            {
-                int v = _natureSource.GetAttributePoint(cmp, hitter, target);
-                if (v != 100) return v;
-                // 100 may be a legitimate "equal" — fall back only when primary missing the row.
-                if (_natureSource.AttributePoint.TryGetValue(cmp, out var byCmp) && byCmp.ContainsKey(hitter)) return 100;
-            }
-            if (_natureFallback is not null)
-                return _natureFallback.GetAttributePoint(cmp, hitter, target);
-            return 100;
+            if (_natureSource is null) return 100;
+            return _natureSource.GetAttributePoint(cmp, hitter, target);
         }
 
         /// <summary>
@@ -383,7 +364,7 @@ namespace DigitalWorldOnline.Commons.Utils
         /// </summary>
         public static bool HasAttributeAdvantage(this DigimonAttributeEnum hitter, DigimonAttributeEnum target)
         {
-            if (_natureSource is not null || _natureFallback is not null)
+            if (_natureSource is not null)
                 return hitter.GetAttributePoint(target) > 100;
 
             // Fallback for non-Game.Host contexts that never registered a nature source.
@@ -403,7 +384,7 @@ namespace DigitalWorldOnline.Commons.Utils
         /// </summary>
         public static bool HasElementAdvantage(this DigimonElementEnum hitter, DigimonElementEnum target)
         {
-            if (_natureSource is not null || _natureFallback is not null)
+            if (_natureSource is not null)
                 return hitter.GetElementDelta(target) > 0;
 
             return hitter switch
