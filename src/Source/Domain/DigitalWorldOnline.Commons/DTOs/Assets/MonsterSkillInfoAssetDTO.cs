@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace DigitalWorldOnline.Commons.DTOs.Assets
 {
     /// <summary>
@@ -58,5 +60,25 @@ namespace DigitalWorldOnline.Commons.DTOs.Assets
 
         /// <summary>Bin's <c>s_dwMonsterID</c> — denormalised so consumers can filter by mob without joining.</summary>
         public int Type { get; set; }
+
+        // ─── Bin-only fields (post-migration) ────────────────────────────
+        // The dormant Asset_MonsterSkillInfo DB table doesn't carry these.  Source is
+        // Monster.bin §3 only.  [NotMapped] so EF doesn't expect a column.
+
+        /// <summary>
+        /// Bin's <c>s_nEff_Factor[3]</c> — <c>CsMonsterSkill::eFACTOR_TYPE</c> trio.
+        /// Used by GROWTH (14), BERSERK (19), and the debuff-code field for
+        /// Single_StackDeBuff_Attack (22).  Length always 3; <c>0 = FACTOR_TYPE_NONE</c>.
+        /// </summary>
+        [NotMapped]
+        public ushort[] EffectFactor { get; set; } = new ushort[3];
+
+        /// <summary>
+        /// Bin's <c>s_dwEff_Fact_Val[3]</c> — values paired with <see cref="EffectFactor"/>.
+        /// Units depend on factor: scale% for SCALE_INCREASE (multiply by 0.01),
+        /// raw integer for DP_INCREASE / AP_INCREASE.
+        /// </summary>
+        [NotMapped]
+        public uint[] EffectFactorValue { get; set; } = new uint[3];
     }
 }

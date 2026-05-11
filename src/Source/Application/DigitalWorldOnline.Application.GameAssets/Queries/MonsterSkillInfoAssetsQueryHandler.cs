@@ -59,6 +59,10 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
                     ActiveType = (byte)System.Math.Min(skill.ActiveType, (uint)byte.MaxValue),
                     SkillType = skill.SkillType,
                     NoticeTime = skill.NoticeTime,
+                    // Bin-only factor trio — used by GROWTH/BERSERK stat scaling and
+                    // SingleStack debuff dispatch.  Length 3; 0 entries are no-ops.
+                    EffectFactor = skill.EffectFactor,
+                    EffectFactorValue = skill.EffectFactorValue,
                 });
             }
             return Task.FromResult(list);

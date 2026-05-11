@@ -3,6 +3,7 @@ using DigitalWorldOnline.Commons.Models.Asset;
 using DigitalWorldOnline.Commons.Models.Assets;
 using DigitalWorldOnline.Commons.Models.Character;
 using DigitalWorldOnline.Commons.Models.Config;
+using DigitalWorldOnline.Commons.Models.Digimon;
 using DigitalWorldOnline.Commons.Models.Summon;
 using DigitalWorldOnline.Commons.Packets.GameServer;
 using DigitalWorldOnline.Commons.Packets.GameServer.Arena;
@@ -330,13 +331,24 @@ namespace DigitalWorldOnline.Commons.Models.Map
             return Random.Shared.Next(skill.MinValue, skill.MaxValue + 1);
         }
 
-        // eEFFECT_TYPE values mirrored from CsMonsterSkill (Monster.h:126-159).
+        // eEFFECT_TYPE values mirrored from CsMonsterSkill (Monster.h:126-159) +
+        // newer values from common_vs2019/cSkillSource.h:194-230 (eMon_SkillEffect).
         // Server uses bare integer constants per the no-enums-on-server convention —
         // enums live in BinTool only.
-        private const int EffectHpValIncrease = 3;
-        private const int EffectHpValDecrease = 4;
-        private const int EffectDsValDecrease = 10;
-        private const int EffectLegacyHardcoded = 27045;   // pre-bin-migration DB synonym for HP_VAL_DECREASE
+        private const int EffectHpPerIncrease       = 1;    // self-heal: HPValue * roll/100
+        private const int EffectHpValIncrease       = 3;    // self-heal: flat roll
+        private const int EffectHpValDecrease       = 4;    // damage in AoE around self
+        private const int EffectDsValDecrease       = 10;   // DS drain
+        private const int EffectBuffOccure          = 21;   // apply buff (self or target)
+        private const int EffectSingleStackDebuff   = 22;   // single-target damage + debuff stack
+        private const int EffectExterminate         = 30;   // map-wide damage (no distance gate)
+        private const int EffectLegacyHardcoded     = 27045;// pre-bin-migration DB synonym for case 4
+
+        // Default monster-cast buff/debuff duration when the bin row's MaxValue is 0
+        // — the bin sometimes carries 0 for "use the buff's own default", which we
+        // don't have visibility into without loading Buff.bin into this scope.  Picking
+        // 15 s as a sane mid-fight default; can be made bin-driven later if needed.
+        private const int DefaultMonsterCastBuffMs  = 15_000;
 
         public async void SkillTarget(MobConfigModel mob, MonsterSkillInfoAssetModel? targetSkill, List<NpcColiseumAssetModel> npcAsset)
         {
@@ -344,7 +356,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
 
             switch (targetSkill.SkillType)
             {
-                // ─── Self-heal (eEFFECT_TYPE = 3) ─────────────────────────
+                // ─── Self-heal flat (eEFFECT_TYPE = 3) ────────────────────
                 // Mob restores roll(MinValue, MaxValue) HP, capped at HPValue.
                 // No broadcast — client refreshes mob HP via next sync tick.
                 case EffectHpValIncrease:
@@ -355,6 +367,132 @@ namespace DigitalWorldOnline.Commons.Models.Map
                         var newHp = mob.CurrentHP + heal;
                         if (newHp > mob.HPValue) newHp = mob.HPValue;
                         mob.UpdateCurrentHp(newHp);
+                    }
+                    break;
+                }
+
+                // ─── Self-heal percent (eEFFECT_TYPE = 1) ─────────────────
+                // Restore HPValue * roll(MinValue, MaxValue) / 100 (percent).  v487
+                // bin has 1 row of this type — usually low-volume boss self-regen.
+                case EffectHpPerIncrease:
+                {
+                    var percent = RollMonsterSkillValue(targetSkill);
+                    if (percent > 0)
+                    {
+                        var heal = (int)((long)mob.HPValue * percent / 100);
+                        var newHp = mob.CurrentHP + heal;
+                        if (newHp > mob.HPValue) newHp = mob.HPValue;
+                        mob.UpdateCurrentHp(newHp);
+                    }
+                    break;
+                }
+
+                // ─── Buff occurrence (eEFFECT_TYPE = 21) ──────────────────
+                // Apply a buff identified by MinValue (BuffId), with duration MaxValue
+                // (ms; falls back to DefaultMonsterCastBuffMs if zero).  ActiveType
+                // routes the target:
+                //   0 = self    — buff broadcast against the mob's own handler
+                //   1 = target  — broadcast against each target tamer's partner; the
+                //                 partner's BuffList also gets the entry server-side
+                //                 so subsequent buff queries / sync see it.
+                case EffectBuffOccure:
+                {
+                    int buffId = (int)targetSkill.MinValue;
+                    if (buffId <= 0) break;
+                    int duration = targetSkill.MaxValue > 0 ? targetSkill.MaxValue : DefaultMonsterCastBuffMs;
+                    int skillCode = targetSkill.SkillId;
+
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+
+                    if (targetSkill.ActiveType == 1)
+                    {
+                        // Apply to every in-range target tamer's partner.
+                        var copy = new List<CharacterModel>(mob.TargetTamers);
+                        foreach (var target in copy)
+                        {
+                            var clientToModify = Clients.FirstOrDefault(x => x.Tamer.Partner.Id == target.Partner.Id);
+                            if (clientToModify == null) continue;
+                            var d = UtilitiesFunctions.CalculateDistance(
+                                mob.CurrentLocation.X, clientToModify.Partner.Location.X,
+                                mob.CurrentLocation.Y, clientToModify.Partner.Location.Y);
+                            if (d > 1900) continue;
+                            clientToModify.Partner.BuffList.Add(DigimonBuffModel.Create(buffId, skillCode, 0, duration));
+                            BroadcastForTargetTamers(mob.TamersViewing,
+                                new AddBuffPacket(clientToModify.Partner.GeneralHandler, buffId, skillCode, 0, duration).Serialize());
+                        }
+                    }
+                    else
+                    {
+                        // Self-buff: server doesn't track mob buffs (no MobConfigModel.BuffList
+                        // yet); broadcast only — clients see the visual + render it on the mob.
+                        BroadcastForTargetTamers(mob.TamersViewing,
+                            new AddBuffPacket(mob.GeneralHandler, buffId, skillCode, 0, duration).Serialize());
+                    }
+                    break;
+                }
+
+                // ─── Single-target damage + debuff stack (eEFFECT_TYPE = 22) ─
+                // The highest-volume effect in v487 (625 bin rows — 30% of all skills).
+                // Hits the mob's current target only; applies a debuff from EffectFactor[0].
+                // Stack visualisation is client-driven — server fires AddBuffPacket each
+                // cast and the client handles the stack count UI.
+                case EffectSingleStackDebuff:
+                {
+                    var target = mob.Target;
+                    if (target == null || !target.Alive) break;
+                    var clientToModify = Clients.FirstOrDefault(x => x.Tamer.Partner.Id == target.Id);
+                    if (clientToModify == null) break;
+
+                    var d = UtilitiesFunctions.CalculateDistance(
+                        mob.CurrentLocation.X, target.Location.X,
+                        mob.CurrentLocation.Y, target.Location.Y);
+                    if (d > 1900) break;
+
+                    var dmg = RollMonsterSkillValue(targetSkill);
+                    var newHp = target.ReceiveDamage(dmg);
+                    if (newHp <= 0) clientToModify.Partner.Die();
+
+                    var hpRate = (byte)((long)target.CurrentHp * 255L / Math.Max(1, target.HP));
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new SkillHitPacket(mob.GeneralHandler, target.GeneralHandler, 0, dmg, hpRate).Serialize());
+
+                    // Debuff stack — EffectFactor[0] = debuff BuffId, EffectFactorValue[0] = duration ms.
+                    int debuffId = targetSkill.EffectFactor.Length > 0 ? targetSkill.EffectFactor[0] : 0;
+                    if (debuffId > 0)
+                    {
+                        int debuffMs = targetSkill.EffectFactorValue.Length > 0
+                            ? (int)Math.Min(targetSkill.EffectFactorValue[0], (uint)int.MaxValue)
+                            : 0;
+                        if (debuffMs == 0) debuffMs = DefaultMonsterCastBuffMs;
+
+                        target.DebuffList.Add(DigimonDebuffModel.Create(debuffId, targetSkill.SkillId, 1, debuffMs));
+                        BroadcastForTargetTamers(mob.TamersViewing,
+                            new AddBuffPacket(target.GeneralHandler, debuffId, targetSkill.SkillId, 1, debuffMs).Serialize());
+                    }
+                    break;
+                }
+
+                // ─── Map-wide damage (eEFFECT_TYPE = 30 Exterminate) ──────
+                // Same as HP_VAL_DECREASE but no distance gate — every player on the
+                // map gets hit.  Wipe-mechanic boss attacks ("global annihilation").
+                case EffectExterminate:
+                {
+                    var dmg = RollMonsterSkillValue(targetSkill);
+                    BroadcastForTargetTamers(mob.TamersViewing,
+                        new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+                    foreach (var c in Clients.ToList())
+                    {
+                        var partner = c.Tamer?.Partner;
+                        if (partner == null || !partner.Alive) continue;
+                        if (partner.Location.MapId != mob.Location.MapId) continue;
+                        var newHp = partner.ReceiveDamage(dmg);
+                        var hpRate = (byte)((long)partner.CurrentHp * 255L / Math.Max(1, partner.HP));
+                        BroadcastForTargetTamers(mob.TamersViewing,
+                            new SkillHitPacket(mob.GeneralHandler, partner.GeneralHandler, 0, dmg, hpRate).Serialize());
+                        if (newHp <= 0) partner.Die();
                     }
                     break;
                 }

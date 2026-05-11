@@ -57,5 +57,15 @@ namespace DigitalWorldOnline.Commons.Models.Asset
 
         /// <summary>Bin's <c>s_dwMonsterID</c> — denormalised so consumers can filter by mob without joining.</summary>
         public int Type { get; set; }
+
+        /// <summary>
+        /// Bin's <c>s_nEff_Factor[3]</c> — <c>CsMonsterSkill::eFACTOR_TYPE</c> trio.
+        /// Used by GROWTH (14), BERSERK (19), and the debuff-code field for
+        /// Single_StackDeBuff_Attack (22).  Length always 3; <c>0 = FACTOR_TYPE_NONE</c>.
+        /// </summary>
+        public ushort[] EffectFactor { get; set; } = new ushort[3];
+
+        /// <summary>Bin's <c>s_dwEff_Fact_Val[3]</c> — values paired with <see cref="EffectFactor"/>.</summary>
+        public uint[] EffectFactorValue { get; set; } = new uint[3];
     }
 }
