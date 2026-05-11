@@ -341,7 +341,31 @@ namespace DigitalWorldOnline.GameHost
                             break;
                         }
 
-                        var skillList = _assets.MonsterSkillInfo.Where(x => x.Type == mob.Type).ToList();
+                        // ─── Step 6: cast window + per-skill cooldown ────────────
+                        if (mob.IsCasting)
+                            break;
+
+                        if (mob.CastingComplete && mob.CastingSkillIndex.HasValue)
+                        {
+                            var castingId = mob.CastingSkillIndex.Value;
+                            var castingSkill = _assets.MonsterSkillInfo.FirstOrDefault(s => s.Type == mob.Type && s.SkillId == castingId);
+                            mob.FinishCast();
+                            if (castingSkill != null && !mob.Dead && !mob.Chasing && mob.TargetAlive)
+                            {
+                                map.SkillTarget(mob, castingSkill, _assets.NpcColiseum);
+                                mob.MarkSkillCooldown(castingId, castingSkill.Cooldown);
+                                if (mob.Target != null)
+                                {
+                                    mob.UpdateCurrentAction(MobActionEnum.Wait);
+                                    mob.SetNextAction();
+                                }
+                            }
+                            break;
+                        }
+
+                        var skillList = _assets.MonsterSkillInfo
+                            .Where(x => x.Type == mob.Type && !mob.IsSkillOnCooldown(x.SkillId))
+                            .ToList();
 
                         if (!skillList.Any())
                         {
@@ -354,7 +378,6 @@ namespace DigitalWorldOnline.GameHost
                         }
 
                         Random random = new Random();
-
                         var targetSkill = skillList[random.Next(0, skillList.Count)];
 
                         if (!mob.Dead && !mob.Chasing && mob.TargetAlive)
@@ -367,19 +390,7 @@ namespace DigitalWorldOnline.GameHost
 
                             if (diff <= 1900)
                             {
-                                if (DateTime.Now < mob.LastSkillTime.AddMilliseconds(mob.Cooldown) && mob.Cooldown > 0)
-                                    break;
-
-                                map.SkillTarget(mob, targetSkill, _assets.NpcColiseum);
-
-
-
-                                if (mob.Target != null)
-                                {
-                                    mob.UpdateCurrentAction(MobActionEnum.Wait);
-
-                                    mob.SetNextAction();
-                                }
+                                mob.StartCast(targetSkill.SkillId, targetSkill.CastingTime, moveLocked: false);
                             }
                             else
                             {

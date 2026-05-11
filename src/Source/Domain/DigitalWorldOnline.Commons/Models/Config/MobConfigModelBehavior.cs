@@ -247,6 +247,45 @@ namespace DigitalWorldOnline.Commons.Models.Config
 
         public void SetSkillCooldown(int cooldown) => Cooldown = cooldown;
 
+        // ─── per-skill cooldown + cast window helpers (Step 6) ──────────────
+
+        /// <summary>True when this specific skill's cooldown hasn't yet elapsed.</summary>
+        public bool IsSkillOnCooldown(int skillIndex) =>
+            SkillCooldowns.TryGetValue(skillIndex, out var ends) && ends > DateTime.Now;
+
+        /// <summary>True when the mob is mid-cast and the cast time hasn't yet elapsed.</summary>
+        public bool IsCasting => CastingSkillIndex.HasValue && DateTime.Now < CastingUntil;
+
+        /// <summary>True when a cast is queued AND its cast time has elapsed — caller should fire SkillTarget now.</summary>
+        public bool CastingComplete => CastingSkillIndex.HasValue && DateTime.Now >= CastingUntil;
+
+        /// <summary>
+        /// Begin a cast.  Stamps which skill is in flight and when it lands.  <paramref name="moveLocked"/>
+        /// mirrors bin's <c>s_nCastCheck == 1</c> — when true, the mob's walk / chase tick paths
+        /// should skip moving until the cast completes.
+        /// </summary>
+        public void StartCast(int skillIndex, int castTimeMs, bool moveLocked)
+        {
+            CastingSkillIndex = skillIndex;
+            CastingUntil = DateTime.Now.AddMilliseconds(castTimeMs);
+            CastingMovementLocked = moveLocked;
+        }
+
+        /// <summary>Clear the cast state after firing or on cancel.</summary>
+        public void FinishCast()
+        {
+            CastingSkillIndex = null;
+            CastingMovementLocked = false;
+            CastingUntil = DateTime.MinValue;
+        }
+
+        /// <summary>Mark a skill's cooldown as ending <paramref name="cooldownMs"/> from now.</summary>
+        public void MarkSkillCooldown(int skillIndex, int cooldownMs)
+        {
+            if (cooldownMs <= 0) return;
+            SkillCooldowns[skillIndex] = DateTime.Now.AddMilliseconds(cooldownMs);
+        }
+
         public void UpdateChaseTime(DateTime chaseEnd) => ChaseEndTime = chaseEnd;
 
         public void UpdateLastHit() => LastHitTime = DateTime.Now;

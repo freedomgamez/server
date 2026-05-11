@@ -137,6 +137,20 @@ namespace DigitalWorldOnline.Commons.Models.Config
         public int GeneralHandler { get; private set; }
         public int CurrentHP { get; private set; }
         public int Cooldown { get; private set; }
+
+        // ─── per-skill cooldown + cast window (Monster.bin §3 / Step 6) ──────
+        // Replaces the old single-global `Cooldown` — that's still here for any
+        // caller that hasn't been migrated, but mob-skill rotation now reads
+        // these instead.  Source fields: bin's s_dwCoolTime / s_nCastTime /
+        // s_nCastCheck per CsMonsterSkill::sINFO.
+        /// <summary>Per-skill cooldown end-times keyed by SkillIndex (bin's s_nSkill_IDX).</summary>
+        public Dictionary<int, DateTime> SkillCooldowns { get; } = new();
+        /// <summary>Skill index currently being cast, or null when not casting.</summary>
+        public int? CastingSkillIndex { get; private set; }
+        /// <summary>When the current cast completes — damage applies on the tick AFTER this.</summary>
+        public DateTime CastingUntil { get; private set; }
+        /// <summary>True when the bin says s_nCastCheck==1 for the active cast — mob root-locked until cast complete.</summary>
+        public bool CastingMovementLocked { get; private set; }
         public Location CurrentLocation { get; private set; }
         public Location PreviousLocation { get; private set; }
         public Location InitialLocation { get; private set; }

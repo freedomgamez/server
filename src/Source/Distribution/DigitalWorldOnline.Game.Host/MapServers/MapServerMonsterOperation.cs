@@ -384,7 +384,34 @@ namespace DigitalWorldOnline.GameHost
                             break;
                         }
 
-                        var skillList = _assets.MonsterSkillInfo.Where(x => x.Type == mob.Type).ToList();
+                        // ─── Step 6: cast window + per-skill cooldown ────────────
+                        // If we're mid-cast, either wait for the cast to land OR fire it now
+                        // and apply the per-skill cooldown (bin's s_dwCoolTime).
+                        if (mob.IsCasting)
+                            break;          // still in cast window — next tick will check again
+
+                        if (mob.CastingComplete && mob.CastingSkillIndex.HasValue)
+                        {
+                            var castingId = mob.CastingSkillIndex.Value;
+                            var castingSkill = _assets.MonsterSkillInfo.FirstOrDefault(s => s.Type == mob.Type && s.SkillId == castingId);
+                            mob.FinishCast();
+                            if (castingSkill != null && !mob.Dead && !mob.Chasing && mob.TargetAlive)
+                            {
+                                map.SkillTarget(mob, castingSkill, _assets.NpcColiseum);
+                                mob.MarkSkillCooldown(castingId, castingSkill.Cooldown);
+                                if (mob.Target != null)
+                                {
+                                    mob.UpdateCurrentAction(MobActionEnum.Wait);
+                                    mob.SetNextAction();
+                                }
+                            }
+                            break;
+                        }
+
+                        // No active cast — pick a skill that's off its OWN cooldown (not the global).
+                        var skillList = _assets.MonsterSkillInfo
+                            .Where(x => x.Type == mob.Type && !mob.IsSkillOnCooldown(x.SkillId))
+                            .ToList();
 
                         if (!skillList.Any())
                         {
@@ -397,7 +424,6 @@ namespace DigitalWorldOnline.GameHost
                         }
 
                         Random random = new Random();
-
                         var targetSkill = skillList[random.Next(0, skillList.Count)];
 
                         if (!mob.Dead && !mob.Chasing && mob.TargetAlive)
@@ -410,19 +436,10 @@ namespace DigitalWorldOnline.GameHost
 
                             if (diff <= 1900)
                             {
-                                if (DateTime.Now < mob.LastSkillTime.AddMilliseconds(mob.Cooldown) && mob.Cooldown > 0)
-                                    break;
-
-                                map.SkillTarget(mob, targetSkill, _assets.NpcColiseum);
-
-
-
-                                if (mob.Target != null)
-                                {
-                                    mob.UpdateCurrentAction(MobActionEnum.Wait);
-
-                                    mob.SetNextAction();
-                                }
+                                // Start the cast.  If CastingTime > 0 the damage fires on a later
+                                // tick (after CastingUntil); if 0, CastingComplete is true on the
+                                // NEXT tick — preserves the old "fire now" feel for instant skills.
+                                mob.StartCast(targetSkill.SkillId, targetSkill.CastingTime, moveLocked: false);
                             }
                             else
                             {
