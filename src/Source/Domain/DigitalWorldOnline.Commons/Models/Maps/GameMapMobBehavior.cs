@@ -319,15 +319,75 @@ namespace DigitalWorldOnline.Commons.Models.Map
             mob.UpdateLastHit();
             mob.UpdateLastHitTry();
         }
+        /// <summary>
+        /// Roll one effect-value sample from the bin's [MinValue..MaxValue] range
+        /// (s_dwEff_Val_Min / s_dwEff_Val_Max).  Pre-Step-8 the server always used
+        /// MaxValue as a flat number; Step 8 honours the bin's actual range.
+        /// </summary>
+        private static int RollMonsterSkillValue(MonsterSkillInfoAssetModel skill)
+        {
+            if (skill.MaxValue <= skill.MinValue) return skill.MaxValue;
+            return Random.Shared.Next(skill.MinValue, skill.MaxValue + 1);
+        }
+
+        // eEFFECT_TYPE values mirrored from CsMonsterSkill (Monster.h:126-159).
+        // Server uses bare integer constants per the no-enums-on-server convention —
+        // enums live in BinTool only.
+        private const int EffectHpValIncrease = 3;
+        private const int EffectHpValDecrease = 4;
+        private const int EffectDsValDecrease = 10;
+        private const int EffectLegacyHardcoded = 27045;   // pre-bin-migration DB synonym for HP_VAL_DECREASE
+
         public async void SkillTarget(MobConfigModel mob, MonsterSkillInfoAssetModel? targetSkill, List<NpcColiseumAssetModel> npcAsset)
         {
+            if (targetSkill == null) return;
+
             switch (targetSkill.SkillType)
             {
-                case 27045:
+                // ─── Self-heal (eEFFECT_TYPE = 3) ─────────────────────────
+                // Mob restores roll(MinValue, MaxValue) HP, capped at HPValue.
+                // No broadcast — client refreshes mob HP via next sync tick.
+                case EffectHpValIncrease:
+                {
+                    var heal = RollMonsterSkillValue(targetSkill);
+                    if (heal > 0)
+                    {
+                        var newHp = mob.CurrentHP + heal;
+                        if (newHp > mob.HPValue) newHp = mob.HPValue;
+                        mob.UpdateCurrentHp(newHp);
+                    }
+                    break;
+                }
+
+                // ─── DS drain on target tamers (eEFFECT_TYPE = 10) ────────
+                case EffectDsValDecrease:
+                {
+                    var drain = RollMonsterSkillValue(targetSkill);
+                    if (drain > 0)
+                    {
+                        var targetsCopy = new List<CharacterModel>(mob.TargetTamers);
+                        foreach (var target in targetsCopy)
+                        {
+                            var clientToModify = Clients.FirstOrDefault(x => x.Tamer.Partner.Id == target.Partner.Id);
+                            if (clientToModify == null) continue;
+                            var d = UtilitiesFunctions.CalculateDistance(
+                                mob.CurrentLocation.X, clientToModify.Partner.Location.X,
+                                mob.CurrentLocation.Y, clientToModify.Partner.Location.Y);
+                            if (d <= 1900) clientToModify.Partner.UseDs(drain);
+                        }
+                        BroadcastForTargetTamers(mob.TamersViewing,
+                            new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+                    }
+                    break;
+                }
+
+                // ─── Damage to all in-range targets (eEFFECT_TYPE = 4, legacy 27045) ──
+                case EffectHpValDecrease:
+                case EffectLegacyHardcoded:
                     {
                         List<CharacterModel> targetTamers = new List<CharacterModel>();
 
-                        var finalDamage = targetSkill.MaxValue;
+                        var finalDamage = RollMonsterSkillValue(targetSkill);
 
                         // Crie uma cópia da lista mob.TargetTamers para iterar sobre ela
                         var targetTamersCopy = new List<CharacterModel>(mob.TargetTamers);
@@ -418,13 +478,19 @@ namespace DigitalWorldOnline.Commons.Models.Map
         }
         public async void SkillTarget(SummonMobModel mob, MonsterSkillInfoAssetModel? targetSkill)
         {
+            if (targetSkill == null) return;
+
             switch (targetSkill.SkillType)
             {
-                case 27045:
+                // Damage path — case 4 (HP_VAL_DECREASE) is the bin value; 27045 stays
+                // as a legacy synonym for pre-migration DB rows.  Summon mobs only fire
+                // damage skills in v487 (no self-heal / DS-drain implementations for them).
+                case EffectHpValDecrease:
+                case EffectLegacyHardcoded:
                     {
                         List<CharacterModel> targetTamers = new List<CharacterModel>();
 
-                        var finalDamage = targetSkill.MaxValue;
+                        var finalDamage = RollMonsterSkillValue(targetSkill);
 
                         // Crie uma cópia da lista mob.TargetTamers para iterar sobre ela
                         var targetTamersCopy = new List<CharacterModel>(mob.TargetTamers);
