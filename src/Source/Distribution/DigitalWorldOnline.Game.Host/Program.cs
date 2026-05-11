@@ -109,6 +109,7 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<CashShopBinLoader>();
                     services.AddSingleton<SkillBinLoader>();
                     services.AddSingleton<NatureBinLoader>();
+                    services.AddSingleton<MonsterBinLoader>();
 
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
                     services.AddSingleton<IProcessor, GamePacketProcessor>();
@@ -143,6 +144,7 @@ namespace DigitalWorldOnline.Game
             var cashShop = host.Services.GetRequiredService<CashShopBinLoader>().Load();
             var skill = host.Services.GetRequiredService<SkillBinLoader>().Load();
             var nature = host.Services.GetRequiredService<NatureBinLoader>().Load();
+            var monster = host.Services.GetRequiredService<MonsterBinLoader>().Load();
             // Element-vs-element + attribute-vs-attribute combat multipliers come from
             // Nature.bin — accessed via Utils.GetElementDelta / GetAttributePoint, which
             // drive the boolean HasElementAdvantage / HasAttributeAdvantage extension
@@ -189,6 +191,9 @@ namespace DigitalWorldOnline.Game
             serilog.Information(
                 "Loaded Skill.bin: {Skills} CsSkill + {TamerSkills} CsTamerSkill + {Areas} CsAreaCheck rows",
                 skill.ById.Count, skill.TamerSkillsByIndex.Count, skill.AreaChecksByIndex.Count);
+            serilog.Information(
+                "Loaded Monster.bin: {Mobs} CsMonster + {Hits} level/hit + {Skills} CsMonsterSkill + {Terms} CsMonsterSkillTerms",
+                monster.ByType.Count, monster.HitByLevel.Count, monster.SkillsByIndex.Count, monster.TermsByIndex.Count);
 
             return host;
         }
