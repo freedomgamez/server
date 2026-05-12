@@ -5,6 +5,7 @@ using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Application.Separar.Queries;
 using DigitalWorldOnline.Application.GameAssets.Queries;
 using DigitalWorldOnline.Commons.Entities;
+using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Enums.Character;
 using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Enums.PacketProcessor;
@@ -36,6 +37,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly PartyManager _partyManager;
         private readonly MapServer _mapServer;
         private readonly DungeonsServer _dungeonServer;
+        private readonly MapRegistry _registry;
         private readonly AssetsLoader _assets;
         private readonly ILogger _logger;
         private readonly ISender _sender;
@@ -45,6 +47,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             PartyManager partyManager,
             MapServer mapServer,
             DungeonsServer dungeonsServer,
+            MapRegistry registry,
             AssetsLoader assets,
             ILogger logger,
             ISender sender,
@@ -54,6 +57,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _partyManager = partyManager;
             _mapServer = mapServer;
             _dungeonServer = dungeonsServer;
+            _registry = registry;
             _assets = assets;
             _logger = logger;
             _sender = sender;
@@ -243,10 +247,10 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _logger.Debug($"Updating account welcome flag for account {client.AccountId}...");
             await _sender.Send(new UpdateAccountWelcomeFlagCommand(client.AccountId, false));
 
-            var channels = new Dictionary<byte, byte>
-            {
-                { 0, 30 }
-            };
+            var channels = new Dictionary<byte, byte>();
+            var mapChannels = _registry.GetChannelsOf(MapTypeEnum.Default, client.Tamer.Location.MapId);
+            foreach (var channel in mapChannels)
+                channels[channel.Channel] = (byte)Math.Min(byte.MaxValue, channel.Clients.Count);
 
             if (!client.DungeonMap)
             {

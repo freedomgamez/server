@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums;
@@ -29,6 +30,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly AssetsLoader _assets;
         private readonly MapServer _mapServer;
         private readonly DungeonsServer _dungeonServer;
+        private readonly MapBinLoader _mapBin;
         private readonly ISender _sender;
         private readonly ILogger _logger;
 
@@ -36,6 +38,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             PartyManager partyManager,
             StatusManager statusManager,
             AssetsLoader assets,
+            MapBinLoader mapBin,
             MapServer mapServer,
             ISender sender,
             ILogger logger,
@@ -44,6 +47,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _partyManager = partyManager;
             _statusManager = statusManager;
             _assets = assets;
+            _mapBin = mapBin;
             _mapServer = mapServer;
             _sender = sender;
             _logger = logger;
@@ -77,6 +81,20 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             var digimonHandle = packet.ReadInt();
             var evoStage = packet.ReadByte();
+
+            if (evoStage < evoLine.Count)
+            {
+                var targetType = evoLine[evoStage].Type;
+                var targetRank = (EvolutionRankEnum)(_assets.DigimonBaseInfo.FirstOrDefault(x => x.Type == targetType)?.EvolutionType ?? 0);
+                var isDevolveToBase = targetType == client.Partner.BaseType;
+                var isCapsuleEvo = targetRank == EvolutionRankEnum.Capsule;
+
+                if (!isDevolveToBase && !isCapsuleEvo && IsInsideLimitEvolutionRegion(client))
+                {
+                    client.Send(new DigimonEvolutionFailPacket());
+                    return;
+                }
+            }
 
             //TODO: desbloquear corretamente na criação
             var starterPartners = new List<int>() { 31001, 31002, 31003, 31004 };
@@ -510,6 +528,31 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             await _sender.Send(new UpdateCharacterActiveEvolutionCommand(client.Tamer.ActiveEvolution));
             await _sender.Send(new UpdateCharacterBasicInfoCommand(client.Tamer));
             await _sender.Send(new UpdateDigimonBuffListCommand(client.Partner.BuffList));
+        }
+
+        private bool IsInsideLimitEvolutionRegion(GameClient client)
+        {
+            if (!_mapBin.IsLoaded)
+                return false;
+
+            int mapId = client.Tamer.Location.MapId;
+            if (!_mapBin.Data.LimitEvoByMapId.TryGetValue(mapId, out var regions) || regions.Count == 0)
+                return false;
+
+            int x = client.Partner?.Location?.X ?? client.Tamer.Location.X;
+            int y = client.Partner?.Location?.Y ?? client.Tamer.Location.Y;
+
+            foreach (var region in regions)
+            {
+                long dx = x - region.CenterX;
+                long dy = y - region.CenterY;
+                long distanceSquared = dx * dx + dy * dy;
+                long radiusSquared = (long)region.Radius * region.Radius;
+                if (distanceSquared < radiusSquared)
+                    return true;
+            }
+
+            return false;
         }
 
         private void UpdateSkillCooldown(GameClient client)

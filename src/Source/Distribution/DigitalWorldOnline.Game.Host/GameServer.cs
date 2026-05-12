@@ -189,10 +189,9 @@ namespace DigitalWorldOnline.Game
                     {
                         var map = UtilitiesFunctions.MapGroup(gameClientEvent.Client.Tamer.Location.MapId);
 
-                        var mapConfig =  await _sender.Send(new GameMapConfigByMapIdQuery(map));
                         var waypoints =  await _sender.Send(new MapRegionListAssetsByMapIdQuery(map));
 
-                        if (mapConfig == null || waypoints == null || !waypoints.Regions.Any())
+                        if (waypoints == null || !waypoints.Regions.Any())
                         {
                             gameClientEvent.Client.Send(new SystemMessagePacket($"Map information not found for map Id {map}."));
                             _logger.Warning($"Map information not found for map Id {map} on character {gameClientEvent.Client.TamerId} jump booster.");
@@ -332,10 +331,9 @@ namespace DigitalWorldOnline.Game
             {
                 var map = UtilitiesFunctions.MapGroup(gameClientEvent.Client.Tamer.Location.MapId);
 
-                var mapConfig = await _sender.Send(new GameMapConfigByMapIdQuery(map));
                 var waypoints = await _sender.Send(new MapRegionListAssetsByMapIdQuery(map));
 
-                if (mapConfig == null || waypoints == null || !waypoints.Regions.Any())
+                if (waypoints == null || !waypoints.Regions.Any())
                 {
                     gameClientEvent.Client.Send(new SystemMessagePacket($"Map information not found for map Id {map}."));
                     _logger.Warning($"Map information not found for map Id {map} on character {gameClientEvent.Client.TamerId} jump booster.");

@@ -28,41 +28,6 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Server
             _context = context;
         }
 
-        public async Task<List<MapConfigDTO>> GetGameMapsConfigAsync(MapTypeEnum mapType)
-        {
-            var tamerLocations = await _context.Character
-                .AsNoTracking()
-                .Where(x => x.EventState == CharacterEventStateEnum.None && x.State == CharacterStateEnum.Loading)
-                .Select(x => x.Location)
-                .ToListAsync();
-
-            var tamerMapsIds = tamerLocations
-                .Select(x => (int)x.MapId)
-                .ToList();
-
-            var maps = await _context.MapConfig
-                .AsNoTracking()
-                .AsSplitQuery()
-                .Include(x => x.KillSpawns)
-                .ThenInclude( y=> y.SourceMobs)
-                .Include(x => x.KillSpawns)
-                .ThenInclude(y => y.TargetMobs)
-                .Include(x => x.Mobs)
-                    .ThenInclude(y => y.Location)
-                .Include(x => x.Mobs)
-                    .ThenInclude(y => y.ExpReward)
-                .Include(x => x.Mobs)
-                    .ThenInclude(y => y.DropReward)
-                        .ThenInclude(z => z.BitsDrop)
-                .Include(x => x.Mobs)
-                    .ThenInclude(y => y.DropReward)
-                        .ThenInclude(z => z.Drops)
-                .Where(x => x.Type == mapType && tamerMapsIds.Contains(x.MapId))
-                .ToListAsync();
-
-            return maps;
-        }
-
         public async Task<DigimonLevelStatusAssetDTO?> GetDigimonLevelingStatusAsync(int type, byte level)
         {
             return await _context.DigimonLevelStatusAsset
@@ -186,21 +151,6 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Server
             return await _context.CharacterConsignedShop
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.CharacterId == characterId);
-        }
-
-        public async Task<List<MapAssetDTO>> GetMapAssetsAsync()
-        {
-            return await _context.MapAsset
-                .AsNoTracking()
-                .ToListAsync();
-        }
-
-        public async Task<MapRegionListAssetDTO?> GetMapRegionListAssetsAsync(int mapId)
-        {
-            return await _context.MapRegionListAsset
-                .AsNoTracking()
-                .Include(x => x.Regions)
-                .FirstOrDefaultAsync(x => x.MapId == mapId);
         }
 
         public async Task<byte> GetCharacterInServerAsync(long accountId, long serverId)
@@ -406,14 +356,6 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Server
                 .ToListAsync();
         }
 
-        public async Task<List<MapConfigDTO>> GetGameMapConfigsForAdminAsync()
-        {
-            return await _context.MapConfig
-                .AsNoTracking()
-                .Include(x => x.Mobs)
-                .ToListAsync();
-        }
-
         public async Task<List<ScanDetailAssetDTO>> GetScanDetailAssetsAsync()
         {
             return await _context.ScanDetail
@@ -459,11 +401,6 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Server
                 .FirstOrDefaultAsync();
 
             return dto?.Hash;
-        }
-
-        public async Task<List<PortalAssetDTO>> GetPortalAssetsAsync()
-        {
-            return await _context.Portals.ToListAsync();
         }
 
         public async Task<List<ContainerAssetDTO>> GetContainerAssetsAsync()

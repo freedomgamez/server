@@ -55,12 +55,6 @@ namespace DigitalWorldOnline.Commons.Interfaces
 
         Task<List<DigimonSkillAssetDTO>> GetDigimonSkillAssetsAsync();
 
-        Task<MapRegionListAssetDTO?> GetMapRegionListAssetsAsync(int mapId);
-
-        Task<List<MapConfigDTO>> GetGameMapsConfigAsync(MapTypeEnum mapType);
-
-        Task<List<MapAssetDTO>> GetMapAssetsAsync();
-
         Task<DigimonBaseInfoAssetDTO?> GetDigimonBaseInfoAsync(int type);
         
         Task<IList<DigimonBaseInfoAssetDTO>> GetAllDigimonBaseInfoAsync();
@@ -105,8 +99,6 @@ namespace DigitalWorldOnline.Commons.Interfaces
 
         Task<List<UserDTO>> GetAdminUsersAsync();
 
-        Task<List<MapConfigDTO>> GetGameMapConfigsForAdminAsync();
-
         Task<List<ScanDetailAssetDTO>> GetScanDetailAssetsAsync();
 
         Task<List<StatusApplyAssetDTO>> GetStatusApplyInfoAsync();
@@ -118,8 +110,6 @@ namespace DigitalWorldOnline.Commons.Interfaces
         Task<List<AccessoryRollAssetDTO>> GetAccessoryRollInfoAsync();
 
         Task<string> GetResourcesHashAsync();
-
-        Task<List<PortalAssetDTO>> GetPortalAssetsAsync();
 
         Task<List<ContainerAssetDTO>> GetContainerAssetsAsync();
 

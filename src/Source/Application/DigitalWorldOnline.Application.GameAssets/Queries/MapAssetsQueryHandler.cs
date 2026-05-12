@@ -1,21 +1,36 @@
-﻿using DigitalWorldOnline.Commons.DTOs.Assets;
-using DigitalWorldOnline.Commons.Interfaces;
+﻿using DigitalWorldOnline.Application.GameAssets.Bins;
+using DigitalWorldOnline.Commons.DTOs.Assets;
 using MediatR;
 
 namespace DigitalWorldOnline.Application.GameAssets.Queries
 {
     public class MapAssetsQueryHandler : IRequestHandler<MapAssetsQuery, List<MapAssetDTO>>
     {
-        private readonly IServerQueriesRepository _repository;
+        private readonly MapBinLoader _mapBin;
 
-        public MapAssetsQueryHandler(IServerQueriesRepository repository)
+        public MapAssetsQueryHandler(MapBinLoader mapBin)
         {
-            _repository = repository;
+            _mapBin = mapBin;
         }
 
-        public async Task<List<MapAssetDTO>> Handle(MapAssetsQuery request, CancellationToken cancellationToken)
+        public Task<List<MapAssetDTO>> Handle(MapAssetsQuery request, CancellationToken cancellationToken)
         {
-            return await _repository.GetMapAssetsAsync();
+            if (_mapBin.IsLoaded)
+            {
+                return Task.FromResult(_mapBin.Data.MapsById.Values
+                    .Select(map => new MapAssetDTO
+                    {
+                        Id = map.MapId,
+                        MapId = map.MapId,
+                        Name = $"Map {map.MapId}",
+                        RegionIndex = (byte)Math.Min(byte.MaxValue, map.MapRegionId)
+                    })
+                    .OrderBy(map => map.MapId)
+                    .ToList());
+            }
+
+            throw new InvalidOperationException(
+                "Map static assets must come from MapList.bin (MapAssetsQuery).");
         }
     }
 }

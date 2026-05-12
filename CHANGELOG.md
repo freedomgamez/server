@@ -2,6 +2,33 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## Map bins migrated to Game.Host static-data path (MapList/Portal/Region/MonsterList)
+
+Map-related static catalogs are now fully bin-driven in Game.Host, replacing DB-backed static queries for map metadata, portals, regions, and mob spawn layout.
+
+- **New loader:** `src/Source/Application/DigitalWorldOnline.Application.GameAssets/Bins/MapBinLoader.cs` + `MapBin.cs`
+  - Reads `MapList.bin`, `MapPortal.bin`, `MapRegion.bin`, `MapMonsterList.bin`.
+  - `MapRegion` parser aligned to client struct size (`CsMapRegion::sINFO` = 604 bytes).
+- **Startup wiring:** `src/Source/Distribution/DigitalWorldOnline.Game.Host/Program.cs`
+  - Registers/loads `MapBinLoader` at boot and logs loaded map-bin counts.
+- **Bin-backed handlers (no static DB fallback):**
+  - `MapAssetsQueryHandler`
+  - `PortalAssetsQueryHandler`
+  - `MapRegionListAssetsByMapIdQueryHandler`
+  - `GameMapConfigByIdQueryHandler`
+  - `GameMapConfigByMapIdQueryHandler`
+  - `GameMapConfigsQueryHandler`
+  - `GameMapsConfigQueryHandler`
+  - `GetGameMapConfigForAdminQueryHandler`
+  - `MapMobConfigsQueryHandler`
+  - `MapMobsByIdQueryHandler`
+- **Runtime map/channel integration:**
+  - `DefaultMapDriver` builds default-map catalog + mob templates from bins.
+  - Map-server packet paths that consume map/region/mob static data now resolve via bin-backed queries.
+- **Stability fixes landed with migration:**
+  - Explicit `ConsignedShopsQueryHandler` registration in Game.Host DI to avoid runtime MediatR handler-construction loops.
+  - Map-mob queries now treat maps with no `MapMonsterList` rows as valid empty spawn sets (instead of throwing), which matches current bin content.
+
 ## Map layer rework + retail-like channel system (Phases A–E)
 
 End-to-end rework of the Game.Host map layer to support multi-channel-per-map with auto-scaling, plus the supporting infrastructure underneath it.  The pre-rework code had four parallel `*Server` classes copy-pasting the same `List<GameMap>` scan-and-iterate skeleton, no central index, and a stubbed channel system that hardcoded `{0:30}` for every request.  Six phases land here; channels (E) are the user-visible payoff.

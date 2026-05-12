@@ -1,6 +1,9 @@
 using AutoMapper;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.Separar.Queries;
+using DigitalWorldOnline.Commons.DTOs.Config;
 using DigitalWorldOnline.Commons.Enums;
+using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Models.Config;
 using DigitalWorldOnline.Commons.Models.Map;
 using MediatR;
@@ -17,6 +20,15 @@ namespace DigitalWorldOnline.GameHost;
 /// </summary>
 public sealed class DefaultMapDriver : MapDriver
 {
+    private readonly MapBinLoader _mapBin;
+    private readonly MonsterBinLoader _monsterBin;
+
+    public DefaultMapDriver(MapBinLoader mapBin, MonsterBinLoader monsterBin)
+    {
+        _mapBin = mapBin;
+        _monsterBin = monsterBin;
+    }
+
     /// <summary>
     /// Always-on channel count per default map.  Channels 0..N-1 spawn at boot
     /// and are never auto-closed (Phase E Step 5 protection — channel 0 stays
@@ -50,7 +62,7 @@ public sealed class DefaultMapDriver : MapDriver
         ILogger logger,
         CancellationToken ct)
     {
-        var dtos = await sender.Send(new GameMapsConfigQuery(MapTypeEnum.Default), ct);
+        var dtos = BuildDefaultMapsFromBins();
 
         foreach (var dto in dtos)
         {
@@ -130,6 +142,95 @@ public sealed class DefaultMapDriver : MapDriver
                 map.MapId, map.Name, map.Channel);
             map.MarkForClose();
         }
+    }
+
+    private List<MapConfigDTO> BuildDefaultMapsFromBins()
+    {
+        if (!_mapBin.IsLoaded || !_monsterBin.IsLoaded)
+            throw new InvalidOperationException("Map static catalogs must come from bins (DefaultMapDriver).");
+
+        var result = new List<MapConfigDTO>(_mapBin.Data.MapsById.Count);
+        foreach (var map in _mapBin.Data.MapsById.Values.OrderBy(x => x.MapId))
+        {
+            var mobs = new List<MobConfigDTO>();
+            if (_mapBin.Data.MonstersByMapId.TryGetValue(map.MapId, out var mapMobs))
+            {
+                long id = 1;
+                foreach (var mapMob in mapMobs)
+                {
+                    if (!_monsterBin.Data.ByType.TryGetValue(mapMob.MonsterTableId, out var mon))
+                        continue;
+
+                    mobs.Add(new MobConfigDTO
+                    {
+                        Id = id++,
+                        Type = mapMob.MonsterTableId,
+                        Model = mon.ModelId,
+                        Name = $"Mob {mapMob.MonsterTableId}",
+                        Level = (byte)Math.Min(byte.MaxValue, mon.Level),
+                        ViewRange = mon.Sight,
+                        HuntRange = mon.HuntRange,
+                        Class = mon.Class,
+                        Coliseum = false,
+                        Round = 0,
+                        WeekDay = DungeonDayOfWeekEnum.Sunday,
+                        ColiseumMobType = ColiseumMobTypeEnum.Normal,
+                        ReactionType = DigimonReactionTypeEnum.Passive,
+                        Attribute = (DigimonAttributeEnum)0,
+                        Element = (DigimonElementEnum)0,
+                        Family1 = (DigimonFamilyEnum)0,
+                        Family2 = (DigimonFamilyEnum)0,
+                        Family3 = (DigimonFamilyEnum)0,
+                        RespawnInterval = mapMob.RespawnSeconds,
+                        HPValue = mon.Hp,
+                        DSValue = mon.Ds,
+                        DEValue = mon.DefPower,
+                        EVValue = mon.Evasion,
+                        MSValue = mon.MoveSpeed,
+                        WSValue = mon.WalkSpeed,
+                        CTValue = mon.CriticalRate,
+                        ATValue = mon.AttPower,
+                        ASValue = mon.AttSpeed,
+                        ARValue = mon.AttRange,
+                        HTValue = mon.HitRate,
+                        BLValue = 0,
+                        Location = new MobLocationConfigDTO
+                        {
+                            Id = id,
+                            MobConfigId = id,
+                            MapId = (short)map.MapId,
+                            X = mapMob.CenterX,
+                            Y = mapMob.CenterY
+                        },
+                        ExpReward = new MobExpRewardConfigDTO
+                        {
+                            Id = id,
+                            MobId = id,
+                            TamerExperience = mon.ExpMax,
+                            DigimonExperience = mon.ExpMax
+                        },
+                        DropReward = new MobDropRewardConfigDTO
+                        {
+                            Id = id,
+                            MobId = id
+                        },
+                        GameMapConfigId = map.MapId
+                    });
+                }
+            }
+
+            result.Add(new MapConfigDTO
+            {
+                Id = map.MapId,
+                MapId = map.MapId,
+                Name = $"Map {map.MapId}",
+                Type = MapTypeEnum.Default,
+                Mobs = mobs,
+                KillSpawns = new()
+            });
+        }
+
+        return result;
     }
 
     private static void Spawn(

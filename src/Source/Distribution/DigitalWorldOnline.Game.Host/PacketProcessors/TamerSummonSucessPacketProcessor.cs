@@ -64,10 +64,9 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             if (targetClient != null)
             {
-                var mapConfig = await _sender.Send(new GameMapConfigByMapIdQuery(targetClient.Tamer.Location.MapId));
                 var waypoints = await _sender.Send(new MapRegionListAssetsByMapIdQuery(targetClient.Tamer.Location.MapId));
 
-                if (mapConfig == null || waypoints == null || !waypoints.Regions.Any())
+                if (waypoints == null || !waypoints.Regions.Any())
                 {
                     client.Send(new SystemMessagePacket($"Map information not found for map Id {targetClient.Tamer.Location.MapId}."));
                     _logger.Warning($"Map information not found for map Id {targetClient.Tamer.Location.MapId} on character {client.TamerId} jump booster.");

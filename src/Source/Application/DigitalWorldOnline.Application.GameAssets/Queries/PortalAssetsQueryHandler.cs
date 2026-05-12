@@ -1,21 +1,41 @@
-﻿using DigitalWorldOnline.Commons.DTOs.Assets;
-using DigitalWorldOnline.Commons.Interfaces;
+﻿using DigitalWorldOnline.Application.GameAssets.Bins;
+using DigitalWorldOnline.Commons.DTOs.Assets;
+using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using MediatR;
 
 namespace DigitalWorldOnline.Application.GameAssets.Queries
 {
     public class PortalAssetsQueryHandler : IRequestHandler<PortalAssetsQuery, List<PortalAssetDTO>>
     {
-        private readonly IServerQueriesRepository _repository;
+        private readonly MapBinLoader _mapBin;
 
-        public PortalAssetsQueryHandler(IServerQueriesRepository repository)
+        public PortalAssetsQueryHandler(MapBinLoader mapBin)
         {
-            _repository = repository;
+            _mapBin = mapBin;
         }
 
-        public async Task<List<PortalAssetDTO>> Handle(PortalAssetsQuery request, CancellationToken cancellationToken)
+        public Task<List<PortalAssetDTO>> Handle(PortalAssetsQuery request, CancellationToken cancellationToken)
         {
-            return await _repository.GetPortalAssetsAsync();
+            if (_mapBin.IsLoaded)
+            {
+                return Task.FromResult(_mapBin.Data.PortalsBySourceMapId.Values
+                    .SelectMany(portals => portals)
+                    .Select(portal => new PortalAssetDTO
+                    {
+                        Id = portal.PortalId,
+                        Type = portal.PortalType == 1 ? PortalTypeEnum.Dungeon : PortalTypeEnum.Normal,
+                        NpcId = portal.UniqObjectId,
+                        DestinationMapId = portal.DestMapId,
+                        DestinationX = portal.DestX,
+                        DestinationY = portal.DestY,
+                        PortalIndex = 0
+                    })
+                    .OrderBy(portal => portal.Id)
+                    .ToList());
+            }
+
+            throw new InvalidOperationException(
+                "Portal static assets must come from MapPortal.bin (PortalAssetsQuery).");
         }
     }
 }

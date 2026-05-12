@@ -893,9 +893,8 @@ namespace DigitalWorldOnline.Game
                         var mapId = Convert.ToInt32(command[1]);
                         var waypoint = command.Length == 3 ? Convert.ToInt32(command[2]) : 0;
 
-                        var mapConfig = await _sender.Send(new GameMapConfigByMapIdQuery(mapId));
                         var waypoints = await _sender.Send(new MapRegionListAssetsByMapIdQuery(mapId));
-                        if (mapConfig == null || waypoints == null || !waypoints.Regions.Any())
+                        if (waypoints == null || !waypoints.Regions.Any())
                         {
                             client.Send(new SystemMessagePacket($"Map information not found for ID {mapId}"));
                             break;

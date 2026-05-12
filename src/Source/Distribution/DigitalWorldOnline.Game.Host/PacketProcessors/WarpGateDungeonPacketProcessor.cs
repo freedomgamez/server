@@ -73,9 +73,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                 var mapId = client.Tamer.Location.MapId;
 
-                var mapConfig = await _sender.Send(new GameMapConfigByMapIdQuery(mapId));
                 var waypoints = await _sender.Send(new MapRegionListAssetsByMapIdQuery(mapId));
-                if (mapConfig == null || waypoints == null || !waypoints.Regions.Any())
+                if (waypoints == null || !waypoints.Regions.Any())
                 {
                     client.Send(new SystemMessagePacket($"Map information not found for {mapId}"));
                     _logger.Error($"Map information not found for {mapId}");

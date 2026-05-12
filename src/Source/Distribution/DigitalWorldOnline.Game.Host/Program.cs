@@ -4,7 +4,9 @@ using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.GameAssets.Mapping;
 using DigitalWorldOnline.Application.Admin.Repositories;
 using DigitalWorldOnline.Application.Extensions;
+using DigitalWorldOnline.Application.Separar.Queries;
 using DigitalWorldOnline.Application.Services;
+using DigitalWorldOnline.Commons.DTOs.Shop;
 using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Repositories.Admin;
 using DigitalWorldOnline.Game.Managers;
@@ -121,6 +123,7 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<SkillBinLoader>();
                     services.AddSingleton<NatureBinLoader>();
                     services.AddSingleton<MonsterBinLoader>();
+                    services.AddSingleton<MapBinLoader>();
 
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
                     services.AddSingleton<IProcessor, GamePacketProcessor>();
@@ -131,6 +134,7 @@ namespace DigitalWorldOnline.Game
                     services.AddMediatR(
                         typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly,
                         typeof(GameAssetsMarker).GetTypeInfo().Assembly);
+                    services.AddScoped<IRequestHandler<ConsignedShopsQuery, IList<ConsignedShopDTO>>, ConsignedShopsQueryHandler>();
                     services.AddTransient<Mediator>();
 
                     AddAutoMapper(services);
@@ -156,6 +160,7 @@ namespace DigitalWorldOnline.Game
             var skill = host.Services.GetRequiredService<SkillBinLoader>().Load();
             var nature = host.Services.GetRequiredService<NatureBinLoader>().Load();
             var monster = host.Services.GetRequiredService<MonsterBinLoader>().Load();
+            var mapBin = host.Services.GetRequiredService<MapBinLoader>().Load();
             // Element-vs-element + attribute-vs-attribute combat multipliers come from
             // Nature.bin — accessed via Utils.GetElementDelta / GetAttributePoint, which
             // drive the boolean HasElementAdvantage / HasAttributeAdvantage extension
@@ -206,6 +211,9 @@ namespace DigitalWorldOnline.Game
             serilog.Information(
                 "Loaded Monster.bin: {Mobs} CsMonster + {Hits} level/hit + {Skills} CsMonsterSkill + {Terms} CsMonsterSkillTerms",
                 monster.ByType.Count, monster.HitByLevel.Count, monster.SkillsByIndex.Count, monster.TermsByIndex.Count);
+            serilog.Information(
+                "Loaded map bins: MapList={Maps}, MapPortal={PortalMaps}, MapRegion={RegionMaps}, MapMonsterList={MonsterMaps}",
+                mapBin.MapsById.Count, mapBin.PortalsBySourceMapId.Count, mapBin.RegionsByMapId.Count, mapBin.MonstersByMapId.Count);
 
             return host;
         }

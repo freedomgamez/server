@@ -1,25 +1,36 @@
-﻿using AutoMapper;
-using DigitalWorldOnline.Commons.Interfaces;
+﻿using DigitalWorldOnline.Application.GameAssets.Bins;
 using MediatR;
 
 namespace DigitalWorldOnline.Application.Separar.Queries
 {
     public class GetGameMapConfigForAdminQueryHandler : IRequestHandler<GetGameMapConfigForAdminQuery, List<GetGameMapConfigForAdminQueryDto>>
     {
-        private readonly IServerQueriesRepository _repository;
-        private readonly IMapper _mapper;
+        private readonly MapBinLoader _mapBin;
 
-        public GetGameMapConfigForAdminQueryHandler(IServerQueriesRepository repository, IMapper mapper)
+        public GetGameMapConfigForAdminQueryHandler(MapBinLoader mapBin)
         {
-            _repository = repository;
-            _mapper = mapper;
+            _mapBin = mapBin;
         }
 
-        public async Task<List<GetGameMapConfigForAdminQueryDto>> Handle(GetGameMapConfigForAdminQuery request, CancellationToken cancellationToken)
+        public Task<List<GetGameMapConfigForAdminQueryDto>> Handle(GetGameMapConfigForAdminQuery request, CancellationToken cancellationToken)
         {
-            var maps = await _repository.GetGameMapConfigsForAdminAsync();
+            if (_mapBin.IsLoaded)
+            {
+                var maps = _mapBin.Data.MapsById.Values
+                    .OrderBy(x => x.MapId)
+                    .Select(map => new GetGameMapConfigForAdminQueryDto
+                    {
+                        Id = map.MapId,
+                        MapId = map.MapId,
+                        Name = $"Map {map.MapId}",
+                        Mobs = _mapBin.Data.MonstersByMapId.TryGetValue(map.MapId, out var mobs) ? mobs.Count : 0
+                    })
+                    .ToList();
 
-            return _mapper.Map<List<GetGameMapConfigForAdminQueryDto>>(maps);
+                return Task.FromResult(maps);
+            }
+
+            throw new InvalidOperationException("Admin map static data must come from bins (GetGameMapConfigForAdminQuery).");
         }
     }
 }
