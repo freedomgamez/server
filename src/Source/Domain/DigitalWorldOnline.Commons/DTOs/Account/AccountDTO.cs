@@ -1,6 +1,7 @@
 ﻿using DigitalWorldOnline.Commons.DTOs.Base;
 using DigitalWorldOnline.Commons.Enums.Account;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace DigitalWorldOnline.Commons.DTOs.Account
 {
@@ -41,6 +42,7 @@ namespace DigitalWorldOnline.Commons.DTOs.Account
         //FK
         public SystemInformationDTO? SystemInformation { get; set; }
         public AccountBlockDTO? AccountBlock { get; set; }
+        [NotMapped]
         public List<ItemListDTO> ItemList { get; set; }
     }
 }

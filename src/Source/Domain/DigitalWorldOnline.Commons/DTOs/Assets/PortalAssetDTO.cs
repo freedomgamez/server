@@ -32,6 +32,5 @@ namespace DigitalWorldOnline.Commons.DTOs.Assets
         public int DestinationY { get; set; }
 
         public int PortalIndex { get; set; }
-
     }
 }

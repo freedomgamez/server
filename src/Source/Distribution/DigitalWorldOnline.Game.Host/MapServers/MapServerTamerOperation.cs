@@ -169,7 +169,7 @@ namespace DigitalWorldOnline.GameHost
                             {
 
                                 client.Send(new ItemExpiredPacket(InventorySlotTypeEnum.TabInven, item.Slot, item.ItemId, ExpiredTypeEnum.Remove));
-                                tamer.Inventory.RemoveOrReduceItem(item, item.Amount);
+                                tamer.Warehouse.RemoveOrReduceItem(item, item.Amount);
                             }
                         }
                     }
@@ -189,7 +189,7 @@ namespace DigitalWorldOnline.GameHost
                             {
 
                                 client.Send(new ItemExpiredPacket(InventorySlotTypeEnum.TabWarehouse, item.Slot, item.ItemId, ExpiredTypeEnum.Remove));
-                                tamer.Inventory.RemoveOrReduceItem(item, item.Amount);
+                                tamer.Warehouse.RemoveOrReduceItem(item, item.Amount);
                             }
                         }
                     }
@@ -209,7 +209,7 @@ namespace DigitalWorldOnline.GameHost
                             {
 
                                 client.Send(new ItemExpiredPacket(InventorySlotTypeEnum.TabShareStash, item.Slot, item.ItemId, ExpiredTypeEnum.Remove));
-                                tamer.Inventory.RemoveOrReduceItem(item, item.Amount);
+                                tamer.AccountWarehouse.RemoveOrReduceItem(item, item.Amount);
                             }
                         }
                     }
@@ -249,18 +249,18 @@ namespace DigitalWorldOnline.GameHost
                             {
 
                                 client.Send(new ItemExpiredPacket(InventorySlotTypeEnum.TabChipset, item.Slot, item.ItemId, ExpiredTypeEnum.Remove));
-                                tamer.Equipment.RemoveOrReduceItem(item, item.Amount);
+                                tamer.ChipSets.RemoveOrReduceItem(item, item.Amount);
                             }
                         }
                     }
 
                    
 
-                    _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
-                    _sender.Send(new UpdateItemsCommand(client.Tamer.Warehouse));
-                    _sender.Send(new UpdateItemsCommand(client.Tamer.AccountWarehouse));
-                    _sender.Send(new UpdateItemsCommand(client.Tamer.Equipment));
-                    _sender.Send(new UpdateItemsCommand(client.Tamer.ChipSets));
+                    _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory)).GetAwaiter().GetResult();
+                    _sender.Send(new UpdateItemsCommand(client.Tamer.Warehouse)).GetAwaiter().GetResult();
+                    _sender.Send(new UpdateItemsCommand(client.Tamer.AccountWarehouse)).GetAwaiter().GetResult();
+                    _sender.Send(new UpdateItemsCommand(client.Tamer.Equipment)).GetAwaiter().GetResult();
+                    _sender.Send(new UpdateItemsCommand(client.Tamer.ChipSets)).GetAwaiter().GetResult();
                 }
 
                 if (tamer.CheckBuffsTime)
@@ -283,6 +283,7 @@ namespace DigitalWorldOnline.GameHost
                         {
 
                             client?.Send(new UpdateStatusPacket(tamer));
+                            map.BroadcastForTamerViewsAndSelf(tamer.Id, new UpdateMovementSpeedPacket(tamer).Serialize());
                             map.BroadcastForTargetTamers(tamer.Id, new UpdateCurrentHPRatePacket(tamer.GeneralHandler, tamer.HpRate).Serialize());
                             _sender.Send(new UpdateCharacterBuffListCommand(tamer.BuffList));
 
@@ -306,6 +307,7 @@ namespace DigitalWorldOnline.GameHost
                         if (buffsToRemove.Any())
                         {
                             client?.Send(new UpdateStatusPacket(tamer));
+                            map.BroadcastForTamerViewsAndSelf(tamer.Id, new UpdateMovementSpeedPacket(tamer).Serialize());
                             map.BroadcastForTargetTamers(tamer.Id, new UpdateCurrentHPRatePacket(tamer.Partner.GeneralHandler, tamer.Partner.HpRate).Serialize());
                             _sender.Send(new UpdateDigimonBuffListCommand(tamer.Partner.BuffList));
                         }
@@ -882,16 +884,12 @@ namespace DigitalWorldOnline.GameHost
         private static int CalculateDamage(CharacterModel tamer, out double critBonusMultiplier, out bool blocked)
         {
             critBonusMultiplier = 0;
-
-            var multiplier = 1;
-
-            if (tamer.Partner.BaseInfo.Attribute.
-                HasAttributeAdvantage(tamer.TargetMob.Attribute)
-                || tamer.Partner.BaseInfo.Element
-                .HasElementAdvantage(tamer.TargetMob.Element))
-                multiplier = 2;
-
-            var baseDamage = tamer.Partner.AT * multiplier;
+            var baseDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                tamer.Partner.AT,
+                tamer.Partner.BaseInfo.Attribute,
+                tamer.TargetMob.Attribute,
+                tamer.Partner.BaseInfo.Element,
+                tamer.TargetMob.Element);
 
             var random = new Random();
             // Gere um valor aleatório entre 0% e 5% a mais do valor original
@@ -968,30 +966,15 @@ namespace DigitalWorldOnline.GameHost
             var ResultDamageDoubleAdvantage = 0;
             double MultiplierAttribute = 0;
 
-            var attributeVantage = tamer.Partner.BaseInfo.Attribute.
-                HasAttributeAdvantage(tamer.TargetMob.Attribute);
-            var elementVantage = tamer.Partner.BaseInfo.Element
-                .HasElementAdvantage(tamer.TargetMob.Element);
-
-
-            ResultDamage = ResultAT + (int)Math.Floor((double)0);
+            ResultDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                ResultAT,
+                tamer.Partner.BaseInfo.Attribute,
+                tamer.TargetMob.Attribute,
+                tamer.Partner.BaseInfo.Element,
+                tamer.TargetMob.Element);
             double addedCriticalDamage = ResultDamage * 0.8;
             addedCriticalDamage *= (1 + ((criticalDamageValue + 0) / 100.0));
             ResultCriticalDamage = ResultDamage + (int)Math.Floor(addedCriticalDamage);
-
-            if (tamer.Partner.AttributeExperience.CurrentAttributeExperience && attributeVantage)
-            {
-
-                MultiplierAttribute = (2 + ((tamer.Partner.ATT) / 200.0));
-
-                ResultDamageDoubleAdvantage = (int)Math.Floor(0 + (MultiplierAttribute * ResultAT));
-
-            }
-            else if (tamer.Partner.AttributeExperience.CurrentElementExperience && elementVantage)
-            {
-                MultiplierAttribute = 2;
-                ResultDamageDoubleAdvantage = (int)Math.Floor(0 + (MultiplierAttribute * ResultAT));
-            }
 
             double FinalValue = ResultCriticalDamage + ResultDamageDoubleAdvantage;
 
@@ -1044,7 +1027,7 @@ namespace DigitalWorldOnline.GameHost
 
                 if (client.Tamer.AccountCashWarehouse.AddItem(newItem))
                 {
-                    _sender.Send(new UpdateItemsCommand(client.Tamer.AccountCashWarehouse));
+                    _sender.Send(new UpdateItemsCommand(client.Tamer.AccountCashWarehouse)).GetAwaiter().GetResult();
                 }
 
                 _sender.Send(new UpdateTamerAttendanceRewardCommand(client.Tamer.AttendanceReward));

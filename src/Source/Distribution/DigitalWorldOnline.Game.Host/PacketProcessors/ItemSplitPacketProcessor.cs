@@ -1,5 +1,4 @@
 ﻿using DigitalWorldOnline.Application;
-using DigitalWorldOnline.Application.GameAssets;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums;
@@ -18,16 +17,13 @@ namespace DigitalWorldOnline.Game.PacketProcessors
     {
         public GameServerPacketEnum Type => GameServerPacketEnum.SplitItem;
 
-        private readonly AssetsLoader _assets;
         private readonly ISender _sender;
         private readonly ILogger _logger;
 
         public ItemSplitPacketProcessor(
-            AssetsLoader assets,
             ISender sender,
             ILogger logger)
         {
-            _assets = assets;
             _sender = sender;
             _logger = logger;
         }
@@ -48,17 +44,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             {
                 case ItemListMovimentationEnum.InventoryToInventory:
                     {
-                        var sourceItem = client.Tamer.Inventory.FindItemBySlot(originSlot);
-                        var temp = (ItemModel)sourceItem.Clone();
-                        temp.SetAmount(amountToSplit);
-                     
-                        if (client.Tamer.Inventory.SplitItem(temp, destinationSlot))
-                        {
-                            sourceItem.ReduceAmount(amountToSplit);
-                            client.Send(new SplitItemPacket(originSlot, destinationSlot, amountToSplit));
-                        }
-                        else
-                            client.Send(new SplitItemPacket(originSlot, destinationSlot, 0));
+                        var success = client.Tamer.Inventory.TrySplitAcrossLists(client.Tamer.Inventory, originSlot, destinationSlot, amountToSplit);
+                        client.Send(new SplitItemPacket(originSlot, destinationSlot, success ? amountToSplit : (short)0));
 
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
                     }
@@ -69,25 +56,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         var srcSlot = originSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
 
-                        var sourceItem = client.Tamer.Inventory.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Warehouse.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            destItem.IncreaseAmount(amountToSplit);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-                        else
-                        {
-                            var tempItem = (ItemModel)sourceItem.Clone();
-                            tempItem.Amount = amountToSplit;
-                            tempItem.SetItemInfo(sourceItem.ItemInfo);
-
-                            client.Tamer.Warehouse.AddItemWithSlot(tempItem, dstSlot);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-
-                        client.Send(new SplitItemPacket(originSlot, destinationSlot, amountToSplit));
+                        var success = client.Tamer.Inventory.TrySplitAcrossLists(client.Tamer.Warehouse, srcSlot, dstSlot, amountToSplit);
+                        client.Send(new SplitItemPacket(originSlot, destinationSlot, success ? amountToSplit : (short)0));
 
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Warehouse));
@@ -99,25 +69,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         var srcSlot = originSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
 
-                        var sourceItem = client.Tamer.Inventory.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.AccountWarehouse.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            destItem.IncreaseAmount(amountToSplit);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-                        else
-                        {
-                            var tempItem = (ItemModel)sourceItem.Clone();
-                            tempItem.Amount = amountToSplit;
-                            tempItem.SetItemInfo(sourceItem.ItemInfo);
-
-                            client.Tamer.AccountWarehouse.AddItemWithSlot(tempItem, dstSlot);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-
-                        client.Send(new SplitItemPacket(originSlot, destinationSlot, amountToSplit));
+                        var success = client.Tamer.Inventory.TrySplitAcrossLists(client.Tamer.AccountWarehouse, srcSlot, dstSlot, amountToSplit);
+                        client.Send(new SplitItemPacket(originSlot, destinationSlot, success ? amountToSplit : (short)0));
 
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.AccountWarehouse));
@@ -129,18 +82,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         var srcSlot = originSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
 
-                        var sourceItem = client.Tamer.Warehouse.FindItemBySlot(srcSlot);
-                        var temp = (ItemModel)sourceItem.Clone();
-                        temp.SetAmount(amountToSplit);
-                        temp.SetItemInfo(sourceItem.ItemInfo);
-
-                        if (client.Tamer.Warehouse.SplitItem(temp, dstSlot))
-                        {
-                            sourceItem.ReduceAmount(amountToSplit);
-                            client.Send(new SplitItemPacket(originSlot, destinationSlot, amountToSplit));
-                        }
-                        else
-                            client.Send(new SplitItemPacket(originSlot, destinationSlot, 0));
+                        var success = client.Tamer.Warehouse.TrySplitAcrossLists(client.Tamer.Warehouse, srcSlot, dstSlot, amountToSplit);
+                        client.Send(new SplitItemPacket(originSlot, destinationSlot, success ? amountToSplit : (short)0));
 
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Warehouse));
                     }
@@ -151,25 +94,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         var srcSlot = originSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
 
-                        var sourceItem = client.Tamer.Warehouse.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Inventory.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            destItem.IncreaseAmount(amountToSplit);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-                        else
-                        {
-                            var tempItem = (ItemModel)sourceItem.Clone();
-                            tempItem.Amount = amountToSplit;
-                            tempItem.SetItemInfo(sourceItem.ItemInfo);
-
-                            client.Tamer.Inventory.AddItemWithSlot(tempItem, dstSlot);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-
-                        client.Send(new SplitItemPacket(originSlot, destinationSlot, amountToSplit));
+                        var success = client.Tamer.Warehouse.TrySplitAcrossLists(client.Tamer.Inventory, srcSlot, dstSlot, amountToSplit);
+                        client.Send(new SplitItemPacket(originSlot, destinationSlot, success ? amountToSplit : (short)0));
 
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Warehouse));
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
@@ -181,25 +107,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         var srcSlot = originSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
 
-                        var sourceItem = client.Tamer.Warehouse.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.AccountWarehouse.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            destItem.IncreaseAmount(amountToSplit);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-                        else
-                        {
-                            var tempItem = (ItemModel)sourceItem.Clone();
-                            tempItem.Amount = amountToSplit;
-                            tempItem.SetItemInfo(sourceItem.ItemInfo);
-
-                            client.Tamer.AccountWarehouse.AddItemWithSlot(tempItem, dstSlot);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-
-                        client.Send(new SplitItemPacket(originSlot, destinationSlot, amountToSplit));
+                        var success = client.Tamer.Warehouse.TrySplitAcrossLists(client.Tamer.AccountWarehouse, srcSlot, dstSlot, amountToSplit);
+                        client.Send(new SplitItemPacket(originSlot, destinationSlot, success ? amountToSplit : (short)0));
 
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Warehouse));
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.AccountWarehouse));
@@ -211,19 +120,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         var srcSlot = originSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
 
-                        var sourceItem = client.Tamer.AccountWarehouse.FindItemBySlot(srcSlot);
-                        sourceItem.ItemInfo = _assets.ItemInfo.FirstOrDefault(x => x.ItemId == sourceItem.ItemId);
-                        var temp = (ItemModel)sourceItem.Clone();
-                        temp.SetAmount(amountToSplit);
-                        temp.SetItemInfo(sourceItem.ItemInfo);
-
-                        if (client.Tamer.AccountWarehouse.SplitItem(temp, dstSlot))
-                        {
-                            sourceItem.ReduceAmount(amountToSplit);
-                            client.Send(new SplitItemPacket(originSlot, destinationSlot, amountToSplit));
-                        }
-                        else
-                            client.Send(new SplitItemPacket(originSlot, destinationSlot, 0));
+                        var success = client.Tamer.AccountWarehouse.TrySplitAcrossLists(client.Tamer.AccountWarehouse, srcSlot, dstSlot, amountToSplit);
+                        client.Send(new SplitItemPacket(originSlot, destinationSlot, success ? amountToSplit : (short)0));
 
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.AccountWarehouse));
                     }
@@ -234,25 +132,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         var srcSlot = originSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
 
-                        var sourceItem = client.Tamer.AccountWarehouse.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Inventory.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            destItem.IncreaseAmount(amountToSplit);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-                        else
-                        {
-                            var tempItem = (ItemModel)sourceItem.Clone();
-                            tempItem.Amount = amountToSplit;
-                            tempItem.SetItemInfo(sourceItem.ItemInfo);
-
-                            client.Tamer.Inventory.AddItemWithSlot(tempItem, dstSlot);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-
-                        client.Send(new SplitItemPacket(originSlot, destinationSlot, amountToSplit));
+                        var success = client.Tamer.AccountWarehouse.TrySplitAcrossLists(client.Tamer.Inventory, srcSlot, dstSlot, amountToSplit);
+                        client.Send(new SplitItemPacket(originSlot, destinationSlot, success ? amountToSplit : (short)0));
 
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.AccountWarehouse));
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
@@ -263,26 +144,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
-
-                        var sourceItem = client.Tamer.AccountWarehouse.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Warehouse.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            destItem.IncreaseAmount(amountToSplit);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-                        else
-                        {
-                            var tempItem = (ItemModel)sourceItem.Clone();
-                            tempItem.Amount = amountToSplit;
-                            tempItem.SetItemInfo(sourceItem.ItemInfo);
-
-                            client.Tamer.Warehouse.AddItemWithSlot(tempItem, dstSlot);
-                            sourceItem.ReduceAmount(amountToSplit);
-                        }
-
-                        client.Send(new SplitItemPacket(originSlot, destinationSlot, amountToSplit));
+                        var success = client.Tamer.AccountWarehouse.TrySplitAcrossLists(client.Tamer.Warehouse, srcSlot, dstSlot, amountToSplit);
+                        client.Send(new SplitItemPacket(originSlot, destinationSlot, success ? amountToSplit : (short)0));
 
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.AccountWarehouse));
                         await _sender.Send(new UpdateItemsCommand(client.Tamer.Warehouse));
@@ -290,11 +153,39 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     break;
             }
 
-            client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+            SendItemListRefresh(client, itemListMovimentation);
 
             //_logger.Debug($"Concatting tamer {client.TamerId} items information...");
             //foreach (var item in client.Tamer.ItemList.SelectMany(x => x.Items).Where(x => x.ItemId > 0))
             //    item.SetItemInfo(_assets.ItemInfo.FirstOrDefault(x => x.ItemId == item?.ItemId));
+        }
+
+        private static void SendItemListRefresh(GameClient client, ItemListMovimentationEnum movimentation)
+        {
+            var packets = new List<byte[]>
+            {
+                new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
+            };
+
+            if (movimentation is ItemListMovimentationEnum.InventoryToWarehouse or
+                ItemListMovimentationEnum.WarehouseToWarehouse or
+                ItemListMovimentationEnum.WarehouseToInventory or
+                ItemListMovimentationEnum.WarehouseToAccountWarehouse or
+                ItemListMovimentationEnum.AccountWarehouseToWarehouse)
+            {
+                packets.Add(new LoadInventoryPacket(client.Tamer.Warehouse, InventoryTypeEnum.Warehouse).Serialize());
+            }
+
+            if (movimentation is ItemListMovimentationEnum.InventoryToAccountWarehouse or
+                ItemListMovimentationEnum.WarehouseToAccountWarehouse or
+                ItemListMovimentationEnum.AccountWarehouseToAccountWarehouse or
+                ItemListMovimentationEnum.AccountWarehouseToInventory or
+                ItemListMovimentationEnum.AccountWarehouseToWarehouse)
+            {
+                packets.Add(new LoadInventoryPacket(client.Tamer.AccountWarehouse, InventoryTypeEnum.AccountWarehouse).Serialize());
+            }
+
+            client.Send(UtilitiesFunctions.GroupPackets(packets.ToArray()));
         }
     }
 }

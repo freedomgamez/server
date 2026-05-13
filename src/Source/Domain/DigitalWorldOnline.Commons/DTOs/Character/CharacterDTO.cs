@@ -5,6 +5,7 @@ using DigitalWorldOnline.Commons.DTOs.Events;
 using DigitalWorldOnline.Commons.DTOs.Mechanics;
 using DigitalWorldOnline.Commons.DTOs.Shop;
 using DigitalWorldOnline.Commons.DTOs.Base;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace DigitalWorldOnline.Commons.DTOs.Character
 {
@@ -31,6 +32,7 @@ namespace DigitalWorldOnline.Commons.DTOs.Character
         public DateTime CreateDate { get; set; }
 
         //Refs
+        [NotMapped]
         public List<ItemListDTO> ItemList { get; set; }
         public List<DigimonDTO> Digimons { get; set; }
         public List<CharacterFriendDTO> Friends { get; set; }

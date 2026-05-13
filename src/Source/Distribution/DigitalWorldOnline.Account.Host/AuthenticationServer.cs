@@ -98,12 +98,12 @@ namespace DigitalWorldOnline.Account
         /// <param name="sender">The object itself</param>
         /// <param name="gameClientEvent">Game client who sent the packet</param>
         /// <param name="data">The packet content, in byte array</param>
-        private void OnDataReceivedEvent(object sender, GameClientEvent gameClientEvent, byte[] data)
+        private async void OnDataReceivedEvent(object sender, GameClientEvent gameClientEvent, byte[] data)
         {
             try
             {
                 _logger.Debug($"Received {data.Length} bytes from {gameClientEvent.Client.ClientAddress}.");
-                _processor.ProcessPacketAsync(gameClientEvent.Client, data);
+                await _processor.ProcessPacketAsync(gameClientEvent.Client, data);
             }
             catch (Exception ex)
             {

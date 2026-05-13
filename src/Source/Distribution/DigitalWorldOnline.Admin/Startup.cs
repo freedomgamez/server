@@ -1,6 +1,7 @@
 using Blazored.LocalStorage;
 using DigitalWorldOnline.Admin.Data;
 using DigitalWorldOnline.Application.Admin.Repositories;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.Extensions;
 using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Interfaces;
@@ -89,6 +90,7 @@ namespace DigitalWorldOnline.Admin
             });
 
             services.AddDsoDatabase(Configuration);
+            services.AddSingleton<MapBinLoader>();
             services.AddScoped<IAdminQueriesRepository, AdminQueriesRepository>();
             services.AddScoped<IAdminCommandsRepository, AdminCommandsRepository>();
             

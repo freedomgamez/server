@@ -4,7 +4,9 @@ using DigitalWorldOnline.Application.GameAssets;
 using DigitalWorldOnline.Commons.Enums;
 using DigitalWorldOnline.Commons.Models.Map;
 using DigitalWorldOnline.Game.Managers;
+using DigitalWorldOnline.Commons.Interfaces;
 using MediatR;
+using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 
 namespace DigitalWorldOnline.GameHost
@@ -22,6 +24,7 @@ namespace DigitalWorldOnline.GameHost
         private readonly ILogger _logger;
         private readonly ISender _sender;
         private readonly IMapper _mapper;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly MapRegistry _registry;
         private readonly DefaultMapDriver _driver;
 
@@ -45,6 +48,7 @@ namespace DigitalWorldOnline.GameHost
             ILogger logger,
             ISender sender,
             IMapper mapper,
+            IServiceScopeFactory scopeFactory,
             MapRegistry registry,
             DefaultMapDriver driver)
         {
@@ -59,6 +63,7 @@ namespace DigitalWorldOnline.GameHost
             _logger = logger;
             _sender = sender;
             _mapper = mapper;
+            _scopeFactory = scopeFactory;
             _registry = registry;
             _driver = driver;
 

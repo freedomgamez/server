@@ -1079,52 +1079,18 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             double addedf1Damage = Math.Floor(f1BaseDamage * SkillFactor / 100.0);
 
 
-            var attributeVantage = client.Tamer.Partner.BaseInfo.Attribute.
-                HasAttributeAdvantage(targetMob.Attribute);
-            var elementVantage = client.Tamer.Partner.BaseInfo.Element
-                .HasElementAdvantage(targetMob.Element);
-
-
             var Damage = (int)Math.Floor(f1BaseDamage + addedf1Damage + client.Tamer.Partner.AT + client.Tamer.Partner.SKD);
+            Damage = ApplySkillDamagePercentBonus(Damage, client.Tamer.Partner.SkillDamagePercent);
+            var matrixAdjustedDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                Damage,
+                client.Tamer.Partner.BaseInfo.Attribute,
+                targetMob.Attribute,
+                client.Tamer.Partner.BaseInfo.Element,
+                targetMob.Element);
 
-
-            if (client.Partner.AttributeExperience.CurrentAttributeExperience && attributeVantage)
-            {
-
-                MultiplierAttribute = (2 + ((client.Partner.ATT) / 200.0));
-                Random random = new Random();
-
-                // Gere um valor aleatório entre 0% e 5% a mais do valor original
-                double percentagemBonus = random.NextDouble() * 0.05;
-
-                // Calcule o valor final com o bônus
-                return (int)((int)Math.Floor(MultiplierAttribute * Damage) * (1.0 + percentagemBonus));
-
-            }
-            else if (client.Partner.AttributeExperience.CurrentElementExperience && elementVantage)
-            {
-                MultiplierAttribute = 2;
-
-                Random random = new Random();
-
-                // Gere um valor aleatório entre 0% e 5% a mais do valor original
-                double percentagemBonus = random.NextDouble() * 0.05;
-
-                // Calcule o valor final com o bônus
-                return (int)((int)Math.Floor(MultiplierAttribute * Damage) * (1.0 + percentagemBonus));
-            }
-            else
-            {
-                Random random = new Random();
-
-                // Gere um valor aleatório entre 0% e 5% a mais do valor original
-                double percentagemBonus = random.NextDouble() * 0.05;
-
-                // Calcule o valor final com o bônus
-                return (int)(Damage * (1.0 + percentagemBonus));
-
-
-            }
+            Random random = new Random();
+            double percentagemBonus = random.NextDouble() * 0.05;
+            return (int)(matrixAdjustedDamage * (1.0 + percentagemBonus));
 
         }
         private int CalculateDamageOrHeal(GameClient client, SummonMobModel? targetMob, DigimonSkillAssetModel? targetSkill, SkillCodeAssetModel? skill, byte skillSlot)
@@ -1147,53 +1113,32 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             double addedf1Damage = Math.Floor(f1BaseDamage * SkillFactor / 100.0);
 
 
-            var attributeVantage = client.Tamer.Partner.BaseInfo.Attribute.
-                HasAttributeAdvantage(targetMob.Attribute);
-            var elementVantage = client.Tamer.Partner.BaseInfo.Element
-                .HasElementAdvantage(targetMob.Element);
-
-
             var Damage = (int)Math.Floor(f1BaseDamage + addedf1Damage + client.Tamer.Partner.AT + client.Tamer.Partner.SKD);
+            Damage = ApplySkillDamagePercentBonus(Damage, client.Tamer.Partner.SkillDamagePercent);
+            var matrixAdjustedDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                Damage,
+                client.Tamer.Partner.BaseInfo.Attribute,
+                targetMob.Attribute,
+                client.Tamer.Partner.BaseInfo.Element,
+                targetMob.Element);
 
+            Random random = new Random();
+            double percentagemBonus = random.NextDouble() * 0.05;
+            return (int)(matrixAdjustedDamage * (1.0 + percentagemBonus));
 
-            if (client.Partner.AttributeExperience.CurrentAttributeExperience && attributeVantage)
-            {
+        }
 
-                MultiplierAttribute = (2 + ((client.Partner.ATT) / 200.0));
-                Random random = new Random();
+        private static int ApplySkillDamagePercentBonus(int baseDamage, int percentPoints)
+        {
+            if (baseDamage <= 0 || percentPoints == 0)
+                return baseDamage;
 
-                // Gere um valor aleatório entre 0% e 5% a mais do valor original
-                double percentagemBonus = random.NextDouble() * 0.05;
+            long scaled = (long)baseDamage * (100L + percentPoints);
+            long adjusted = scaled / 100L;
 
-                // Calcule o valor final com o bônus
-                return (int)((int)Math.Floor(MultiplierAttribute * Damage) * (1.0 + percentagemBonus));
-
-            }
-            else if (client.Partner.AttributeExperience.CurrentElementExperience && elementVantage)
-            {
-                MultiplierAttribute = 2;
-
-                Random random = new Random();
-
-                // Gere um valor aleatório entre 0% e 5% a mais do valor original
-                double percentagemBonus = random.NextDouble() * 0.05;
-
-                // Calcule o valor final com o bônus
-                return (int)((int)Math.Floor(MultiplierAttribute * Damage) * (1.0 + percentagemBonus));
-            }
-            else
-            {
-                Random random = new Random();
-
-                // Gere um valor aleatório entre 0% e 5% a mais do valor original
-                double percentagemBonus = random.NextDouble() * 0.05;
-
-                // Calcule o valor final com o bônus
-                return (int)(Damage * (1.0 + percentagemBonus));
-
-
-            }
-
+            if (adjusted > int.MaxValue) return int.MaxValue;
+            if (adjusted < int.MinValue) return int.MinValue;
+            return (int)adjusted;
         }
     }
 }

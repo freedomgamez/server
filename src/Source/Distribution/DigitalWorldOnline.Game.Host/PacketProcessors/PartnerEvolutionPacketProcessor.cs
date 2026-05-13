@@ -229,6 +229,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         {
                             evoEffect = DigimonEvolutionEffectEnum.Default;
 
+                            if (!HasRequiredJogressChipsetEquipped(client, evoInfo.RequiredItem))
+                            {
+                                client.Send(new DigimonEvolutionFailPacket());
+                                return;
+                            }
+
                             if (evoInfo.RequiredItem > 0)
                             {
                                 var accelerator = client.Tamer.Inventory.FindItemById(evoInfo.RequiredItem);
@@ -336,6 +342,13 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         {
                             //TODO: Teste BM X (custo e efeito)
                             evoEffect = DigimonEvolutionEffectEnum.BurstMode;
+
+                            if ((EvolutionRankEnum)evolutionType == EvolutionRankEnum.JogressX &&
+                                !HasRequiredJogressChipsetEquipped(client, evoInfo.RequiredItem))
+                            {
+                                client.Send(new DigimonEvolutionFailPacket());
+                                return;
+                            }
 
                             if (client.Partner.Level < evoInfo.UnlockLevel)
                             {
@@ -528,6 +541,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             await _sender.Send(new UpdateCharacterActiveEvolutionCommand(client.Tamer.ActiveEvolution));
             await _sender.Send(new UpdateCharacterBasicInfoCommand(client.Tamer));
             await _sender.Send(new UpdateDigimonBuffListCommand(client.Partner.BuffList));
+        }
+
+        private static bool HasRequiredJogressChipsetEquipped(GameClient client, int requiredItemId)
+        {
+            if (requiredItemId <= 0)
+                return true;
+
+            var equippedChipset = client.Tamer.JogressChipSet.FindItemBySlot(0);
+            return equippedChipset is not null && equippedChipset.ItemId == requiredItemId && equippedChipset.Amount > 0;
         }
 
         private bool IsInsideLimitEvolutionRegion(GameClient client)

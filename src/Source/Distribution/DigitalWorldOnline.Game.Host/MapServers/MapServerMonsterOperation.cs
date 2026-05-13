@@ -283,7 +283,7 @@ namespace DigitalWorldOnline.GameHost
 
                 case MobActionEnum.Wait:
                     {
-                        if (mob.Respawn && DateTime.Now > mob.DieTime.AddSeconds(2))
+                        if (mob.Respawn)
                         {
                             mob.SetNextWalkTime(UtilitiesFunctions.RandomInt(7, 14));
                             mob.SetAgressiveCheckTime(5);
@@ -1046,7 +1046,7 @@ namespace DigitalWorldOnline.GameHost
 
                     targetClient.Tamer.Inventory.AddBits(amount);
 
-                    _sender.Send(new UpdateItemsCommand(targetClient.Tamer.Inventory));
+                    _sender.Send(new UpdateItemsCommand(targetClient.Tamer.Inventory)).GetAwaiter().GetResult();
                     _logger.Verbose($"Character {targetClient.TamerId} aquired {amount} bits from mob {mob.Id} with magnetic aura {targetClient.Tamer.Aura.ItemId}.");
                 }
                 else
@@ -1119,7 +1119,7 @@ namespace DigitalWorldOnline.GameHost
                             if (targetClient.Tamer.Inventory.AddItem(newItem))
                             {
                                 targetClient.Send(new ReceiveItemPacket(itemClone, InventoryTypeEnum.Inventory));
-                                _sender.Send(new UpdateItemsCommand(targetClient.Tamer.Inventory));
+                                _sender.Send(new UpdateItemsCommand(targetClient.Tamer.Inventory)).GetAwaiter().GetResult();
                                 _logger.Verbose($"Character {targetClient.TamerId} aquired {newItem.ItemId} x{newItem.Amount} from " +
                                     $"mob {mob.Id} with magnetic aura {targetClient.Tamer.Aura.ItemId}.");
                             }
@@ -1260,7 +1260,7 @@ namespace DigitalWorldOnline.GameHost
                             }
                         }
 
-                        if (updateItemList) _sender.Send(new UpdateItemsCommand(tamer.Inventory));
+                        if (updateItemList) _sender.Send(new UpdateItemsCommand(tamer.Inventory)).GetAwaiter().GetResult();
 
                         itemsReward.RemoveAll(x => x.Id == itemDrop.Id);
                     }
@@ -1372,7 +1372,7 @@ namespace DigitalWorldOnline.GameHost
             }
 
             map.BroadcastForTargetTamers(mob.RaidDamage.Select(x => x.Key).ToList(), writer.Serialize());
-            updateItemList.ForEach(itemList => { _sender.Send(new UpdateItemsCommand(itemList)); });
+            updateItemList.ForEach(itemList => { _sender.Send(new UpdateItemsCommand(itemList)).GetAwaiter().GetResult(); });
 
             BlessingFIW(mob, attackerName, attackerType);
         }
@@ -1513,7 +1513,7 @@ namespace DigitalWorldOnline.GameHost
             }
 
             map.BroadcastForTargetTamers(mob.RaidDamage.Select(x => x.Key).ToList(), writer.Serialize());
-            updateItemList.ForEach(itemList => { _sender.Send(new UpdateItemsCommand(itemList)); });
+            updateItemList.ForEach(itemList => { _sender.Send(new UpdateItemsCommand(itemList)).GetAwaiter().GetResult(); });
         }
 
         private void MobsOperation(MapInstance map, SummonMobModel mob)
@@ -1538,7 +1538,7 @@ namespace DigitalWorldOnline.GameHost
 
                 case MobActionEnum.Wait:
                     {
-                        if (mob.Respawn && DateTime.Now > mob.DieTime.AddSeconds(2))
+                        if (mob.Respawn)
                         {
                             mob.SetNextWalkTime(UtilitiesFunctions.RandomInt(7, 14));
                             mob.SetAgressiveCheckTime(5);
@@ -1945,7 +1945,7 @@ namespace DigitalWorldOnline.GameHost
 
                     targetClient.Tamer.Inventory.AddBits(amount);
 
-                    _sender.Send(new UpdateItemsCommand(targetClient.Tamer.Inventory));
+                    _sender.Send(new UpdateItemsCommand(targetClient.Tamer.Inventory)).GetAwaiter().GetResult();
                     _logger.Verbose($"Character {targetClient.TamerId} aquired {amount} bits from mob {mob.Id} with magnetic aura {targetClient.Tamer.Aura.ItemId}.");
                 }
                 else
@@ -2018,7 +2018,7 @@ namespace DigitalWorldOnline.GameHost
                             if (targetClient.Tamer.Inventory.AddItem(newItem))
                             {
                                 targetClient.Send(new ReceiveItemPacket(itemClone, InventoryTypeEnum.Inventory));
-                                _sender.Send(new UpdateItemsCommand(targetClient.Tamer.Inventory));
+                                _sender.Send(new UpdateItemsCommand(targetClient.Tamer.Inventory)).GetAwaiter().GetResult();
                                 _logger.Verbose($"Character {targetClient.TamerId} aquired {newItem.ItemId} x{newItem.Amount} from " +
                                     $"mob {mob.Id} with magnetic aura {targetClient.Tamer.Aura.ItemId}.");
                             }
@@ -2159,7 +2159,7 @@ namespace DigitalWorldOnline.GameHost
                             }
                         }
 
-                        if (updateItemList) _sender.Send(new UpdateItemsCommand(tamer.Inventory));
+                        if (updateItemList) _sender.Send(new UpdateItemsCommand(tamer.Inventory)).GetAwaiter().GetResult();
 
                         itemsReward.RemoveAll(x => x.Id == itemDrop.Id);
                     }

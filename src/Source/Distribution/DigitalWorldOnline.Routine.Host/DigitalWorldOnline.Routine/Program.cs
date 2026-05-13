@@ -83,6 +83,7 @@ namespace DigitalWorldOnline.Routine
                     // access for the bin-driven SUMMON_MONSTER path in Game.Host).  Routine
                     // doesn't consume the catalog but the DI graph still needs it satisfied.
                     services.AddSingleton<MonsterBinLoader>();
+                    services.AddSingleton<ItemListBinLoader>();
                     services.AddSingleton<AssetsLoader>();
                     services.AddMediatR(
                         typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly,

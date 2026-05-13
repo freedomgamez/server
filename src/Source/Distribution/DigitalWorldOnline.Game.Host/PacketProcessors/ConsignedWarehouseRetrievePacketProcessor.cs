@@ -29,16 +29,31 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         public async Task Process(GameClient client, byte[] packetData)
         {
-            var items = client.Tamer.ConsignedWarehouse.Items.Clone();
             var bits = client.Tamer.ConsignedWarehouse.Bits;
 
             _logger.Debug($"Updating consigned warehouse...");
-            client.Tamer.ConsignedWarehouse.RemoveOrReduceItems(items.Clone());
-            client.Tamer.ConsignedWarehouse.RemoveBits(bits);
+            var sourceSlots = client.Tamer.ConsignedWarehouse.Items
+                .Where(x => x.ItemId > 0 && x.Amount > 0)
+                .OrderBy(x => x.Slot)
+                .Select(x => x.Slot)
+                .ToList();
 
             _logger.Debug($"Updating tamer inventory...");
-            client.Tamer.Inventory.AddItems(items.Clone());
-            client.Tamer.Inventory.AddBits(bits);
+            foreach (var sourceSlot in sourceSlots)
+            {
+                var sourceItem = client.Tamer.ConsignedWarehouse.FindItemBySlot(sourceSlot);
+                if (sourceItem == null || sourceItem.ItemId <= 0 || sourceItem.Amount <= 0)
+                    continue;
+
+                var destinationSlot = client.Tamer.Inventory.FindAvailableSlot(sourceItem);
+                if (destinationSlot < 0)
+                    continue;
+
+                client.Tamer.ConsignedWarehouse.TryMoveAcrossLists(client.Tamer.Inventory, sourceSlot, destinationSlot);
+            }
+
+            if (bits > 0 && client.Tamer.Inventory.AddBits(bits))
+                client.Tamer.ConsignedWarehouse.RemoveBits(bits);
 
             _logger.Debug($"Sending load inventory packet...");
             client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));

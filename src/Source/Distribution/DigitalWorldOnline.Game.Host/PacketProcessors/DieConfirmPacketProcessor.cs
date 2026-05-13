@@ -10,9 +10,8 @@ using DigitalWorldOnline.Commons.Models.Asset;
 using DigitalWorldOnline.Commons.Packets.Chat;
 using DigitalWorldOnline.Commons.Packets.MapServer;
 using DigitalWorldOnline.Commons.Utils;
+using DigitalWorldOnline.Game.Services;
 using DigitalWorldOnline.GameHost;
-
-
 using MediatR;
 using Microsoft.Extensions.Configuration;
 
@@ -22,7 +21,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
     {
         public GameServerPacketEnum Type => GameServerPacketEnum.DieConfirm;
 
-        private const string GameServerAddress = "GameServer:Address";
         private const string GamerServerPublic = "GameServer:PublicAddress";
         private const string GameServerPort = "GameServer:Port";
 
@@ -31,18 +29,21 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly IMapper _mapper;
         private readonly IConfiguration _configuration;
         private readonly DungeonsServer _dungeonServer;
+        private readonly OwnerStorageFlushService _ownerStorageFlushService;
         public DieConfirmPacketProcessor(
             MapServer mapServer,
             ISender sender,
             IMapper mapper,
             IConfiguration configuration,
-            DungeonsServer dungeonsServer)
+            DungeonsServer dungeonsServer,
+            OwnerStorageFlushService ownerStorageFlushService)
         {
             _mapServer = mapServer;
             _sender = sender;
             _mapper = mapper;
             _configuration = configuration;
             _dungeonServer = dungeonsServer;
+            _ownerStorageFlushService = ownerStorageFlushService;
         }
 
         public async Task Process(GameClient client, byte[] packetData)
@@ -75,6 +76,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 client.Tamer.UpdateState(CharacterStateEnum.Loading);
                 await _sender.Send(new UpdateCharacterStateCommand(client.TamerId, CharacterStateEnum.Loading));
 
+                await _ownerStorageFlushService.FlushForTransitionAsync(client);
                 _dungeonServer.RemoveClient(client);
 
                 client.Send(new MapSwapPacket(
@@ -102,6 +104,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 client.Tamer.UpdateState(CharacterStateEnum.Loading);
                 await _sender.Send(new UpdateCharacterStateCommand(client.TamerId, CharacterStateEnum.Loading));
 
+                await _ownerStorageFlushService.FlushForTransitionAsync(client);
                 _mapServer.RemoveClient(client);
 
                 client.Send(new MapSwapPacket(

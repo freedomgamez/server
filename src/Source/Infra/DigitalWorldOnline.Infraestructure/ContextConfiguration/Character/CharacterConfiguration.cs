@@ -135,12 +135,6 @@ namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Character
                 .IsRequired();
 
             builder
-                .HasMany(c => c.ItemList)
-                .WithOne()
-                .HasForeignKey("CharacterId")
-                .OnDelete(DeleteBehavior.Cascade);
-
-            builder
                 .HasOne(x => x.BuffList)
                 .WithOne(x => x.Character)
                 .HasForeignKey<CharacterBuffListDTO>(x => x.CharacterId);

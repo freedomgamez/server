@@ -167,6 +167,11 @@ namespace DigitalWorldOnline.Commons.Entities
             ReceiveWelcome = account.ReceiveWelcome;
         }
 
+        public void SetAccountSecondaryPassword(string? secondaryPassword)
+        {
+            AccountSecondaryPassword = secondaryPassword;
+        }
+
         public void IncreaseMembershipDuration(int seconds)
         {
             if (MembershipExpirationDate == null)

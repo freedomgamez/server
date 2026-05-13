@@ -21,7 +21,7 @@ namespace DigitalWorldOnline.Commons.Packets.MapServer
             {
                 WriteUShort((ushort)buff.BuffId);
                 WriteShort(1);
-                WriteInt(Utils.UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
+                WriteInt(buff.Duration == 0 ? unchecked((int)uint.MaxValue) : Math.Max(1, buff.RemainingSeconds));
                 WriteInt(buff.SkillId);
             }
 
@@ -33,7 +33,7 @@ namespace DigitalWorldOnline.Commons.Packets.MapServer
             {
                 WriteUShort((ushort)buff.BuffId);
                 WriteShort(1);
-                WriteInt(Utils.UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
+                WriteInt(buff.Duration == 0 ? unchecked((int)uint.MaxValue) : Math.Max(1, buff.RemainingSeconds));
                 WriteInt(buff.SkillId);
             }
 
@@ -41,7 +41,7 @@ namespace DigitalWorldOnline.Commons.Packets.MapServer
             {
                 WriteUShort((ushort)buff.BuffId);
                 WriteShort(1);
-                WriteInt(Utils.UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
+                WriteInt(buff.Duration == 0 ? unchecked((int)uint.MaxValue) : Math.Max(1, buff.RemainingSeconds));
                 WriteInt(buff.SkillId);
             }
             WriteShort(0);
@@ -62,7 +62,7 @@ namespace DigitalWorldOnline.Commons.Packets.MapServer
             {
                 WriteUShort((ushort)buff.BuffId);
                 WriteShort(1);
-                WriteInt(Utils.UtilitiesFunctions.RemainingTimeSeconds(buff.RemainingSeconds));
+                WriteInt(buff.Duration == 0 ? unchecked((int)uint.MaxValue) : Math.Max(1, buff.RemainingSeconds));
                 WriteInt(buff.SkillId);
             }
 

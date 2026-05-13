@@ -26,21 +26,28 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var targetType = packet.ReadByte();
             var buffId = packet.ReadUShort();
 
-            if (client.Tamer.BuffList.ForceExpired(buffId))
+            if (targetType == 0 || targetType > 1)
             {
-                client.Tamer.BuffList.Remove(buffId);
+                if (client.Tamer.BuffList.ForceExpired(buffId))
+                {
+                    client.Tamer.BuffList.Remove(buffId);
 
-                client?.Send(new RemoveBuffPacket(client.Tamer.GeneralHandler, buffId));
-                client?.Send(new UpdateStatusPacket(client.Tamer));
-                await _sender.Send(new UpdateCharacterBuffListCommand(client.Tamer.BuffList));
+                    client?.Send(new RemoveBuffPacket(client.Tamer.GeneralHandler, buffId));
+                    client?.Send(new UpdateStatusPacket(client.Tamer));
+                    client?.Send(new UpdateMovementSpeedPacket(client.Tamer));
+                    await _sender.Send(new UpdateCharacterBuffListCommand(client.Tamer.BuffList));
+                }
             }
 
-            if (client.Partner.BuffList.ForceExpired(buffId))
+            if (targetType == 1 || targetType > 1)
             {
-                client.Partner.BuffList.Remove(buffId);
-                client?.Send(new RemoveBuffPacket(client.Partner.GeneralHandler, buffId));
-                client?.Send(new UpdateStatusPacket(client.Tamer));
-                await _sender.Send(new UpdateDigimonBuffListCommand(client.Partner.BuffList));
+                if (client.Partner.BuffList.ForceExpired(buffId))
+                {
+                    client.Partner.BuffList.Remove(buffId);
+                    client?.Send(new RemoveBuffPacket(client.Partner.GeneralHandler, buffId));
+                    client?.Send(new UpdateStatusPacket(client.Tamer));
+                    await _sender.Send(new UpdateDigimonBuffListCommand(client.Partner.BuffList));
+                }
             }
         }
     }

@@ -28,7 +28,7 @@ namespace DigitalWorldOnline.Application.GameAssets.Queries
                         DestinationMapId = portal.DestMapId,
                         DestinationX = portal.DestX,
                         DestinationY = portal.DestY,
-                        PortalIndex = 0
+                        PortalIndex = portal.PortalKindIndex
                     })
                     .OrderBy(portal => portal.Id)
                     .ToList());

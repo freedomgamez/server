@@ -27,6 +27,9 @@
         InventoryToDigivice = 41,
         
         InventoryToChipset = 50,
-        ChipsetToInventory = 51
+        ChipsetToInventory = 51,
+
+        InventoryToJogressChipset = 52,
+        JogressChipsetToInventory = 53
     }
 }

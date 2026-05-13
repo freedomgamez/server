@@ -1,20 +1,20 @@
-﻿using DigitalWorldOnline.Commons.Interfaces;
+﻿using DigitalWorldOnline.Application.Services;
 using MediatR;
 
 namespace DigitalWorldOnline.Application.Separar.Commands.Update
 {
     public class UpdateItemAccessoryStatusCommandHandler : IRequestHandler<UpdateItemAccessoryStatusCommand>
     {
-        private readonly ICharacterCommandsRepository _repository;
+        private readonly StoragePersistenceDualWriteCoordinator _dualWriteCoordinator;
 
-        public UpdateItemAccessoryStatusCommandHandler(ICharacterCommandsRepository repository)
+        public UpdateItemAccessoryStatusCommandHandler(StoragePersistenceDualWriteCoordinator dualWriteCoordinator)
         {
-            _repository = repository;
+            _dualWriteCoordinator = dualWriteCoordinator;
         }
 
         public async Task<Unit> Handle(UpdateItemAccessoryStatusCommand request, CancellationToken cancellationToken)
         {
-            await _repository.UpdateItemAccessoryStatusAsync(request.Item);
+            await _dualWriteCoordinator.UpdateItemAccessoryStatusAsync(request.Item);
 
             return Unit.Value;
         }

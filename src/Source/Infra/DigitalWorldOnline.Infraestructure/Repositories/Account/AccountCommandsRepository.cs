@@ -12,6 +12,7 @@ using DigitalWorldOnline.Commons.Models.Base;
 using DigitalWorldOnline.Commons.Models.Config;
 using DigitalWorldOnline.Commons.Models.Security;
 using Microsoft.EntityFrameworkCore;
+using DigitalWorldOnline.Infraestructure.Repositories.Shared.ReadModels;
 
 namespace DigitalWorldOnline.Infraestructure.Repositories.Account
 {
@@ -36,41 +37,35 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Account
             return dto;
         }
 
-        /// <summary>
-        /// Backfills a missing account-level ItemList row for legacy accounts. Idempotent —
-        /// no-op if a row of <paramref name="type"/> already exists for the account. Used
-        /// during login to repair accounts created before <c>AccountModel.Create</c>
-        /// standardized the four account-level lists (AccountWarehouse, CashWarehouse,
-        /// ShopWarehouse, BuyHistory). Without this row, the lookup hits null in
-        /// <c>ComplementarInformationPacketProcessor</c>'s LoadInventoryPacket call and
-        /// silently aborts the handler, leaving the player stuck in Connected state.
-        /// </summary>
         public async Task EnsureAccountItemListAsync(long accountId, ItemListEnum type)
         {
-            var account = await _context.Account
-                .Include(x => x.ItemList)
-                .FirstOrDefaultAsync(x => x.Id == accountId);
-
-            if (account == null)
+            var accountExists = await _context.Account
+                .AsNoTracking()
+                .AnyAsync(x => x.Id == accountId);
+            if (!accountExists)
                 return;
 
-            if (account.ItemList.Any(x => x.Type == type))
+            var existing = await _context.OwnerItemStorageAccount
+                .AsNoTracking()
+                .AnyAsync(x => x.AccountId == accountId && x.Type == (int)type);
+            if (existing)
                 return; // already present, nothing to do
 
-            // Match the runtime's in-memory size convention so a fresh DB row maps cleanly
-            // back to an ItemListModel of the same Size on next login.
             byte size = ItemListModel.BinDrivenDefaults.TryGetValue(type, out var bin)
                 ? bin
                 : DefaultSizeFor(type);
 
-            account.ItemList.Add(new ItemListDTO
+            var storage = new OwnerItemStorageAccountReadModel
             {
-                Type = type,
+                AccountId = accountId,
+                Type = (int)type,
                 Size = size,
                 Bits = 0,
-                Items = new List<ItemDTO>(),
-            });
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
 
+            _context.OwnerItemStorageAccount.Add(storage);
             await _context.SaveChangesAsync();
         }
 
@@ -215,8 +210,6 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Account
             var dto = await _context.Account
                 .Include(x => x.SystemInformation)
                 .Include(x => x.AccountBlock)
-                .Include(x => x.ItemList)
-                    .ThenInclude(y => y.Items)
                 .FirstOrDefaultAsync(x => x.Id == id);
 
             if (dto != null)

@@ -3072,7 +3072,7 @@ namespace DigitalWorldOnline.Infraestructure.Migrations
                         new
                         {
                             Id = 1L,
-                            CreatedAt = new DateTime(2026, 5, 11, 14, 15, 7, 198, DateTimeKind.Local).AddTicks(559),
+                            CreatedAt = new DateTime(2026, 5, 13, 1, 35, 39, 358, DateTimeKind.Local).AddTicks(3947),
                             Hash = "pMgM+NOH0Z+RwR9F1iFVOOwKrW1iDaifx4jWDnH1Dbo="
                         });
                 });
@@ -4805,10 +4805,10 @@ namespace DigitalWorldOnline.Infraestructure.Migrations
                         {
                             Id = 1L,
                             Active = true,
-                            CreatedAt = new DateTime(2026, 5, 11, 14, 15, 7, 201, DateTimeKind.Local).AddTicks(9048),
+                            CreatedAt = new DateTime(2026, 5, 13, 1, 35, 39, 362, DateTimeKind.Local).AddTicks(2993),
                             Interval = 1,
                             Name = "Daily Quests",
-                            NextRunTime = new DateTime(2026, 5, 12, 0, 0, 0, 0, DateTimeKind.Local),
+                            NextRunTime = new DateTime(2026, 5, 14, 0, 0, 0, 0, DateTimeKind.Local),
                             Type = 1
                         });
                 });
@@ -4952,6 +4952,191 @@ namespace DigitalWorldOnline.Infraestructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Asset_Achievement", (string)null);
+                });
+
+            modelBuilder.Entity("DigitalWorldOnline.Infraestructure.Repositories.Shared.ReadModels.NormalizedItemInstanceAccessoryStatusReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid>("ItemInstanceId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<byte>("Slot")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<short>("Type")
+                        .HasColumnType("smallint");
+
+                    b.Property<short>("Value")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemInstanceId", "Slot")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Shared_ItemInstanceAccessoryStatusNormalized_Instance_Slot");
+
+                    b.ToTable("Shared_ItemInstanceAccessoryStatusNormalized", (string)null);
+                });
+
+            modelBuilder.Entity("DigitalWorldOnline.Infraestructure.Repositories.Shared.ReadModels.NormalizedItemInstanceReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<int>("Amount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime(6)")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+
+                    b.Property<int>("Duration")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("EndDate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime(6)")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+
+                    b.Property<byte>("FamilyType")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<bool>("FirstExpired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint(1)")
+                        .HasDefaultValue(true);
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("Power")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<byte>("RerollLeft")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<int>("TamerShopSellPrice")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId")
+                        .HasDatabaseName("IX_Shared_ItemInstanceNormalized_ItemId");
+
+                    b.ToTable("Shared_ItemInstanceNormalized", (string)null);
+                });
+
+            modelBuilder.Entity("DigitalWorldOnline.Infraestructure.Repositories.Shared.ReadModels.NormalizedItemInstanceSocketStatusReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<short>("AttributeId")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("ItemInstanceId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<byte>("Slot")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<short>("Type")
+                        .HasColumnType("smallint");
+
+                    b.Property<short>("Value")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemInstanceId", "Slot")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Shared_ItemInstanceSocketStatusNormalized_Instance_Slot");
+
+                    b.ToTable("Shared_ItemInstanceSocketStatusNormalized", (string)null);
+                });
+
+            modelBuilder.Entity("DigitalWorldOnline.Infraestructure.Repositories.Shared.ReadModels.NormalizedItemListReadModel", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("AccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Bits")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long?>("CharacterId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime(6)")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+
+                    b.Property<ushort>("Size")
+                        .HasColumnType("smallint unsigned");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime(6)")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId", "Type")
+                        .HasDatabaseName("IX_Shared_ItemListNormalized_Account_Type");
+
+                    b.HasIndex("CharacterId", "Type")
+                        .HasDatabaseName("IX_Shared_ItemListNormalized_Character_Type");
+
+                    b.ToTable("Shared_ItemListNormalized", (string)null);
+                });
+
+            modelBuilder.Entity("DigitalWorldOnline.Infraestructure.Repositories.Shared.ReadModels.NormalizedItemSlotReadModel", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("ItemInstanceId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<long>("ItemListId")
+                        .HasColumnType("bigint");
+
+                    b.Property<ushort>("Slot")
+                        .HasColumnType("smallint unsigned");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime(6)")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemInstanceId")
+                        .HasDatabaseName("IX_Shared_ItemSlotNormalized_ItemInstanceId");
+
+                    b.HasIndex("ItemListId", "Slot")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Shared_ItemSlotNormalized_ItemList_Slot");
+
+                    b.ToTable("Shared_ItemSlotNormalized", (string)null);
                 });
 
             modelBuilder.Entity("DigitalWorldOnline.Commons.DTOs.Account.AccountBlockDTO", b =>

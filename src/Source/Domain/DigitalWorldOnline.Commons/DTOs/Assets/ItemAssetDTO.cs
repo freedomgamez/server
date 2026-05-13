@@ -37,17 +37,17 @@ namespace DigitalWorldOnline.Commons.DTOs.Assets
         /// <summary>
         /// Item ApplyValueMin (attributes sockets equipments).
         /// </summary>
-        public short ApplyValueMin { get; private set; }
+        public short ApplyValueMin { get; set; }
 
         /// <summary>
         /// Item ApplyValueMax (attributes sockets equipments).
         /// </summary>
-        public short ApplyValueMax { get; private set; }
+        public short ApplyValueMax { get; set; }
 
         /// <summary>
         /// Item ApplyValueMax (attributes sockets equipments).
         /// </summary>
-        public short ApplyElement { get; private set; }
+        public short ApplyElement { get; set; }
 
         /// <summary>
         /// Item section.

@@ -140,6 +140,11 @@ namespace DigitalWorldOnline.Commons.Enums.PacketProcessor
         MegaphoneMessage = 1074,
 
         /// <summary>
+        /// Client requests a UI/data refresh (pGame::ReloadData).
+        /// </summary>
+        ReloadData = 1080,
+
+        /// <summary>
         /// Sends the digiclone results
         /// </summary>
         PartnerDigiclone = 1075,

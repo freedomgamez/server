@@ -35,6 +35,13 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             var targetClient = _mapServer.FindClientByTamerHandle(client.Tamer.TargetTradeGeneralHandle);
 
+            if (targetClient == null)
+                return;
+
+            if (!client.Tamer.ReserveTradeBits(TargetMoney))
+                return;
+
+            client.Tamer.TradeInventory.RemoveBits(client.Tamer.TradeInventory.Bits);
             client.Tamer.TradeInventory.AddBits(TargetMoney);
 
 

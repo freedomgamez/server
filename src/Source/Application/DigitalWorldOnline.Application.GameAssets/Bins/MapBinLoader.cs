@@ -93,9 +93,9 @@ public sealed class MapBinLoader
                 int destX = r.ReadInt32();
                 int destY = r.ReadInt32();
                 int destRadius = r.ReadInt32();
-                _ = r.ReadInt32();
+                int portalObjectType = r.ReadInt32();
                 int uniqObjectId = r.ReadInt32();
-                _ = r.ReadInt32();
+                int portalKindIndex = r.ReadInt32();
                 int viewX = r.ReadInt32();
                 int viewY = r.ReadInt32();
 
@@ -104,7 +104,20 @@ public sealed class MapBinLoader
                     list = new List<MapPortalRecord>();
                     result.Add(sourceMapId, list);
                 }
-                list.Add(new MapPortalRecord(portalId, portalType, sourceMapId, destMapId, sourceX, sourceY, sourceRadius, destX, destY, destRadius, uniqObjectId));
+                list.Add(new MapPortalRecord(
+                    portalId,
+                    portalType,
+                    sourceMapId,
+                    destMapId,
+                    sourceX,
+                    sourceY,
+                    sourceRadius,
+                    destX,
+                    destY,
+                    destRadius,
+                    portalObjectType,
+                    uniqObjectId,
+                    portalKindIndex));
                 _ = viewX;
                 _ = viewY;
             }

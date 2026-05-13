@@ -6,6 +6,7 @@ using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Packets.GameServer;
 using DigitalWorldOnline.Commons.Packets.MapServer;
+using DigitalWorldOnline.Game.Services;
 using DigitalWorldOnline.GameHost;
 using MediatR;
 using Microsoft.Extensions.Configuration;
@@ -47,19 +48,22 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly ISender _sender;
         private readonly IConfiguration _configuration;
         private readonly ILogger _logger;
+        private readonly OwnerStorageFlushService _ownerStorageFlushService;
 
         public SwitchChannelPacketProcessor(
             MapRegistry registry,
             MapServer mapServer,
             ISender sender,
             IConfiguration configuration,
-            ILogger logger)
+            ILogger logger,
+            OwnerStorageFlushService ownerStorageFlushService)
         {
             _registry = registry;
             _mapServer = mapServer;
             _sender = sender;
             _configuration = configuration;
             _logger = logger;
+            _ownerStorageFlushService = ownerStorageFlushService;
         }
 
         public async Task Process(GameClient client, byte[] packetData)
@@ -125,6 +129,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             client.Tamer.UpdateState(CharacterStateEnum.Loading);
             await _sender.Send(new UpdateCharacterStateCommand(client.TamerId, CharacterStateEnum.Loading));
 
+            await _ownerStorageFlushService.FlushForTransitionAsync(client);
             _mapServer.RemoveClient(client);
 
             // MapSwap to the same map at the current position — the client treats
@@ -164,5 +169,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             client.Send(new AvailableChannelsPacket(loads));
         }
+
     }
 }

@@ -57,8 +57,8 @@ namespace DigitalWorldOnline.Commons.Models.Map
             foreach (var mob in mobsToRemove)
                 RemoveMob(mob);
 
-            //foreach (var mob in _mobsToAdd)
-            //   AddMob(mob);
+            foreach (var mob in _mobsToAdd)
+                AddMob(mob);
 
             FinishMobsUpdate();
         }
@@ -74,8 +74,8 @@ namespace DigitalWorldOnline.Commons.Models.Map
             foreach (var mob in mobsToRemove)
                 RemoveMob(mob);
 
-            //foreach (var mob in _mobsToAdd)
-            //   AddMob(mob);
+            foreach (var mob in _mobsToAdd)
+                AddMob(mob);
 
             FinishMobsUpdate();
         }
@@ -202,25 +202,17 @@ namespace DigitalWorldOnline.Commons.Models.Map
             var levelBonusMultiplier = mob.Level > mob.Target.Level ?
                 (0.01f * (mob.Level - mob.Target.Level)) : 0; //TODO: externalizar no portal
 
-            var attributeMultiplier = 0.00;
-            if (mob.Attribute.HasAttributeAdvantage(mob.Target.BaseInfo.Attribute))
-                attributeMultiplier = 0.25;
-            else if (mob.Target.BaseInfo.Attribute.HasAttributeAdvantage(mob.Attribute))
-                attributeMultiplier = -0.25;
-
-            var elementMultiplier = 0.00;
-            if (mob.Element.HasElementAdvantage(mob.Target.BaseInfo.Element))
-                elementMultiplier = 0.25;
-            else if (mob.Target.BaseInfo.Element.HasElementAdvantage(mob.Element))
-                elementMultiplier = -0.25;
-
             baseDamage /= blocked ? 2 : 1;
+            baseDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                baseDamage,
+                mob.Attribute,
+                mob.Target.BaseInfo.Attribute,
+                mob.Element,
+                mob.Target.BaseInfo.Element);
 
             var finalDmg = (int)Math.Floor(baseDamage +
                 (baseDamage * critBonusMultiplier) +
-                (baseDamage * levelBonusMultiplier) +
-                (baseDamage * attributeMultiplier) +
-                (baseDamage * elementMultiplier));
+                (baseDamage * levelBonusMultiplier));
             #endregion
 
             if (finalDmg <= 0) finalDmg = 1;
@@ -275,25 +267,17 @@ namespace DigitalWorldOnline.Commons.Models.Map
             var levelBonusMultiplier = mob.Level > mob.Target.Level ?
                 (0.01f * (mob.Level - mob.Target.Level)) : 0; //TODO: externalizar no portal
 
-            var attributeMultiplier = 0.00;
-            if (mob.Attribute.HasAttributeAdvantage(mob.Target.BaseInfo.Attribute))
-                attributeMultiplier = 0.25;
-            else if (mob.Target.BaseInfo.Attribute.HasAttributeAdvantage(mob.Attribute))
-                attributeMultiplier = -0.25;
-
-            var elementMultiplier = 0.00;
-            if (mob.Element.HasElementAdvantage(mob.Target.BaseInfo.Element))
-                elementMultiplier = 0.25;
-            else if (mob.Target.BaseInfo.Element.HasElementAdvantage(mob.Element))
-                elementMultiplier = -0.25;
-
             baseDamage /= blocked ? 2 : 1;
+            baseDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                baseDamage,
+                mob.Attribute,
+                mob.Target.BaseInfo.Attribute,
+                mob.Element,
+                mob.Target.BaseInfo.Element);
 
             var finalDmg = (int)Math.Floor(baseDamage +
                 (baseDamage * critBonusMultiplier) +
-                (baseDamage * levelBonusMultiplier) +
-                (baseDamage * attributeMultiplier) +
-                (baseDamage * elementMultiplier));
+                (baseDamage * levelBonusMultiplier));
             #endregion
 
             if (finalDmg <= 0) finalDmg = 1;
@@ -520,6 +504,117 @@ namespace DigitalWorldOnline.Commons.Models.Map
         // don't have visibility into without loading Buff.bin into this scope.  Picking
         // 15 s as a sane mid-fight default; can be made bin-driven later if needed.
         private const int DefaultMonsterCastBuffMs  = 15_000;
+
+        private static int ResolveFallbackDamage(MonsterSkillInfoAssetModel skill)
+        {
+            int min = skill.MinValue;
+            int max = skill.MaxValue;
+
+            if (min > 0 && max >= min)
+                return min + ((max - min) / 2);
+            if (max > 0)
+                return max;
+            if (min > 0)
+                return min;
+            return 1;
+        }
+
+        private static void WarnUnhandledSkillTypeOnce(int skillType, int skillId, int mobType)
+        {
+            bool emit = false;
+            lock (_warnedUnhandledLock)
+            {
+                if (_warnedUnhandledMobSkillTypes.Add(skillType)) emit = true;
+            }
+
+            if (emit)
+                System.Console.WriteLine(
+                    $"[MobSkillDispatch] Unhandled SkillType={skillType} (skillId={skillId}, mobType={mobType}) — fallback damage path engaged.");
+        }
+
+        private void ApplyFallbackDamageSkill(MobConfigModel mob, MonsterSkillInfoAssetModel targetSkill, int damage)
+        {
+            List<CharacterModel> targetTamers = new();
+            var targetTamersCopy = new List<CharacterModel>(mob.TargetTamers);
+
+            foreach (var target in targetTamersCopy)
+            {
+                var clientToModify = Clients.FirstOrDefault(x => x.Tamer.Partner.Id == target.Partner.Id);
+                if (clientToModify == null) continue;
+
+                var diff = UtilitiesFunctions.CalculateDistance(
+                    mob.CurrentLocation.X,
+                    clientToModify.Partner.Location.X,
+                    mob.CurrentLocation.Y,
+                    clientToModify.Partner.Location.Y);
+
+                if (diff > MobSkillRadius(targetSkill))
+                    continue;
+
+                var newHp = clientToModify.Partner.ReceiveDamage(damage);
+                targetTamers.Add(target);
+
+                if (newHp <= 0)
+                    clientToModify.Partner.Die();
+            }
+
+            if (!targetTamers.Any())
+            {
+                ChaseTarget(mob);
+                return;
+            }
+
+            BroadcastForTargetTamers(mob.TamersViewing, new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+
+            foreach (var hitTarget in targetTamers)
+            {
+                var hpRate = (byte)((long)hitTarget.Partner.CurrentHp * 255L / Math.Max(1, hitTarget.Partner.HP));
+                BroadcastForTargetTamers(mob.TamersViewing, new SkillHitPacket(
+                    mob.GeneralHandler, hitTarget.Partner.GeneralHandler, 0, damage, hpRate).Serialize());
+            }
+        }
+
+        private void ApplyFallbackDamageSkill(SummonMobModel mob, MonsterSkillInfoAssetModel targetSkill, int damage)
+        {
+            List<CharacterModel> targetTamers = new();
+            var targetTamersCopy = new List<CharacterModel>(mob.TargetTamers);
+
+            foreach (var target in targetTamersCopy)
+            {
+                var targetPartner = Clients.FirstOrDefault(x => x.Tamer.Partner.Id == target.Partner.Id)?.Partner;
+                if (targetPartner == null) continue;
+
+                var diff = UtilitiesFunctions.CalculateDistance(
+                    mob.CurrentLocation.X,
+                    targetPartner.Location.X,
+                    mob.CurrentLocation.Y,
+                    targetPartner.Location.Y);
+
+                if (diff > MobSkillRadius(targetSkill))
+                    continue;
+
+                var newHp = targetPartner.ReceiveDamage(damage);
+                targetTamers.Add(target);
+
+                if (newHp <= 0)
+                    targetPartner.Die();
+            }
+
+            if (!targetTamers.Any())
+            {
+                ChaseTarget(mob);
+                return;
+            }
+
+            BroadcastForTargetTamers(mob.TamersViewing, new MonsterSkillVisualPacket(mob.GeneralHandler, targetSkill.SkillId).Serialize());
+
+            foreach (var hitTarget in targetTamers)
+            {
+                var hpRate = (byte)((long)hitTarget.Partner.CurrentHp * 255L / Math.Max(1, hitTarget.Partner.HP));
+                BroadcastForTargetTamers(mob.TamersViewing, new SkillHitPacket(
+                    mob.GeneralHandler, hitTarget.Partner.GeneralHandler, 0, damage, hpRate).Serialize());
+            }
+        }
 
         public async void SkillTarget(MobConfigModel mob, MonsterSkillInfoAssetModel? targetSkill, List<NpcColiseumAssetModel> npcAsset)
         {
@@ -1236,15 +1331,8 @@ namespace DigitalWorldOnline.Commons.Models.Map
 
                 default:
                 {
-                    int st = targetSkill.SkillType;
-                    bool emit = false;
-                    lock (_warnedUnhandledLock)
-                    {
-                        if (_warnedUnhandledMobSkillTypes.Add(st)) emit = true;
-                    }
-                    if (emit)
-                        System.Console.WriteLine(
-                            $"[MobSkillDispatch] Unhandled SkillType={st} (skillId={targetSkill.SkillId}, mobType={mob.Type}) — bin row falls through; add a case arm.");
+                    WarnUnhandledSkillTypeOnce(targetSkill.SkillType, targetSkill.SkillId, mob.Type);
+                    ApplyFallbackDamageSkill(mob, targetSkill, ResolveFallbackDamage(targetSkill));
                     break;
                 }
             }
@@ -1340,15 +1428,8 @@ namespace DigitalWorldOnline.Commons.Models.Map
 
                 default:
                 {
-                    int st = targetSkill.SkillType;
-                    bool emit = false;
-                    lock (_warnedUnhandledLock)
-                    {
-                        if (_warnedUnhandledMobSkillTypes.Add(st)) emit = true;
-                    }
-                    if (emit)
-                        System.Console.WriteLine(
-                            $"[MobSkillDispatch] Unhandled SkillType={st} (skillId={targetSkill.SkillId}, mobType={mob.Type}) — bin row falls through; add a case arm.");
+                    WarnUnhandledSkillTypeOnce(targetSkill.SkillType, targetSkill.SkillId, mob.Type);
+                    ApplyFallbackDamageSkill(mob, targetSkill, ResolveFallbackDamage(targetSkill));
                     break;
                 }
             }
@@ -1611,9 +1692,15 @@ namespace DigitalWorldOnline.Commons.Models.Map
 
         public void UpdateMobsList()
         {
-            //_mobsToAdd.Clear();
-            //if (MobsToAdd != null)
-            //    _mobsToAdd.AddRange(MobsToAdd);
+            _mobsToAdd.Clear();
+            if (MobsToAdd != null)
+            {
+                _mobsToAdd.AddRange(
+                    MobsToAdd
+                        .Where(mob => mob != null)
+                        .GroupBy(mob => mob.Id)
+                        .Select(group => group.First()));
+            }
 
             _mobsToDestroy.Clear();
             if (MobsToRemove != null)

@@ -81,9 +81,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             if (newTitle != null)
             {
                 var buff = _assets.BuffInfo.FirstOrDefault(x => x.BuffId == newTitle.BuffId);
-
-                var duration = UtilitiesFunctions.RemainingTimeSeconds(0);
-
                 var newDigimonBuff = DigimonBuffModel.Create(buff.BuffId, buff.SkillId);
 
                 newDigimonBuff.SetBuffInfo(buff);
@@ -128,6 +125,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 new UpdateCurrentTitlePacket(client.Tamer.AppearenceHandler, titleId).Serialize());
 
             client.Send(new UpdateStatusPacket(client.Tamer));
+            _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId, new UpdateMovementSpeedPacket(client.Tamer).Serialize());
 
             await _sender.Send(new UpdateCharacterTitleCommand(client.TamerId, titleId));
             await _sender.Send(new UpdateDigimonBuffListCommand(client.Partner.BuffList));

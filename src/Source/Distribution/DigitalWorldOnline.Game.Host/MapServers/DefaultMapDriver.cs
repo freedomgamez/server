@@ -22,11 +22,13 @@ public sealed class DefaultMapDriver : MapDriver
 {
     private readonly MapBinLoader _mapBin;
     private readonly MonsterBinLoader _monsterBin;
+    private readonly DigimonListBinLoader _digimonListBin;
 
-    public DefaultMapDriver(MapBinLoader mapBin, MonsterBinLoader monsterBin)
+    public DefaultMapDriver(MapBinLoader mapBin, MonsterBinLoader monsterBin, DigimonListBinLoader digimonListBin)
     {
         _mapBin = mapBin;
         _monsterBin = monsterBin;
+        _digimonListBin = digimonListBin;
     }
 
     /// <summary>
@@ -158,64 +160,85 @@ public sealed class DefaultMapDriver : MapDriver
                 long id = 1;
                 foreach (var mapMob in mapMobs)
                 {
-                    if (!_monsterBin.Data.ByType.TryGetValue(mapMob.MonsterTableId, out var mon))
-                        continue;
-
-                    mobs.Add(new MobConfigDTO
+                    foreach (var spawn in MapMonsterSpawnMaterializer.Expand(mapMob))
                     {
-                        Id = id++,
-                        Type = mapMob.MonsterTableId,
-                        Model = mon.ModelId,
-                        Name = $"Mob {mapMob.MonsterTableId}",
-                        Level = (byte)Math.Min(byte.MaxValue, mon.Level),
-                        ViewRange = mon.Sight,
-                        HuntRange = mon.HuntRange,
-                        Class = mon.Class,
-                        Coliseum = false,
-                        Round = 0,
-                        WeekDay = DungeonDayOfWeekEnum.Sunday,
-                        ColiseumMobType = ColiseumMobTypeEnum.Normal,
-                        ReactionType = DigimonReactionTypeEnum.Passive,
-                        Attribute = (DigimonAttributeEnum)0,
-                        Element = (DigimonElementEnum)0,
-                        Family1 = (DigimonFamilyEnum)0,
-                        Family2 = (DigimonFamilyEnum)0,
-                        Family3 = (DigimonFamilyEnum)0,
-                        RespawnInterval = mapMob.RespawnSeconds,
-                        HPValue = mon.Hp,
-                        DSValue = mon.Ds,
-                        DEValue = mon.DefPower,
-                        EVValue = mon.Evasion,
-                        MSValue = mon.MoveSpeed,
-                        WSValue = mon.WalkSpeed,
-                        CTValue = mon.CriticalRate,
-                        ATValue = mon.AttPower,
-                        ASValue = mon.AttSpeed,
-                        ARValue = mon.AttRange,
-                        HTValue = mon.HitRate,
-                        BLValue = 0,
-                        Location = new MobLocationConfigDTO
+                        if (!_monsterBin.Data.ByType.TryGetValue(spawn.MonsterTableId, out var mon))
+                            continue;
+
+                        long mobId = id++;
+                        var digimon = _digimonListBin.Data.FindByType(spawn.MonsterTableId);
+                        var attribute = digimon != null && Enum.IsDefined(typeof(DigimonAttributeEnum), digimon.Attribute)
+                            ? (DigimonAttributeEnum)digimon.Attribute
+                            : DigimonAttributeEnum.None;
+                        var element = digimon != null && Enum.IsDefined(typeof(DigimonElementEnum), digimon.Element)
+                            ? (DigimonElementEnum)digimon.Element
+                            : DigimonElementEnum.Neutral;
+                        var family1 = digimon != null && Enum.IsDefined(typeof(DigimonFamilyEnum), digimon.Family1)
+                            ? (DigimonFamilyEnum)digimon.Family1
+                            : DigimonFamilyEnum.None;
+                        var family2 = digimon != null && Enum.IsDefined(typeof(DigimonFamilyEnum), digimon.Family2)
+                            ? (DigimonFamilyEnum)digimon.Family2
+                            : DigimonFamilyEnum.None;
+                        var family3 = digimon != null && Enum.IsDefined(typeof(DigimonFamilyEnum), digimon.Family3)
+                            ? (DigimonFamilyEnum)digimon.Family3
+                            : DigimonFamilyEnum.None;
+
+                        mobs.Add(new MobConfigDTO
                         {
-                            Id = id,
-                            MobConfigId = id,
-                            MapId = (short)map.MapId,
-                            X = mapMob.CenterX,
-                            Y = mapMob.CenterY
-                        },
-                        ExpReward = new MobExpRewardConfigDTO
-                        {
-                            Id = id,
-                            MobId = id,
-                            TamerExperience = mon.ExpMax,
-                            DigimonExperience = mon.ExpMax
-                        },
-                        DropReward = new MobDropRewardConfigDTO
-                        {
-                            Id = id,
-                            MobId = id
-                        },
-                        GameMapConfigId = map.MapId
-                    });
+                            Id = mobId,
+                            Type = spawn.MonsterTableId,
+                            Model = mon.ModelId,
+                            Name = $"Mob {spawn.MonsterTableId}",
+                            Level = (byte)Math.Min(byte.MaxValue, mon.Level),
+                            ViewRange = mon.Sight,
+                            HuntRange = mon.HuntRange,
+                            Class = mon.Class,
+                            Coliseum = false,
+                            Round = 0,
+                            WeekDay = DungeonDayOfWeekEnum.Sunday,
+                            ColiseumMobType = ColiseumMobTypeEnum.Normal,
+                            ReactionType = DigimonReactionTypeEnum.Passive,
+                            Attribute = attribute,
+                            Element = element,
+                            Family1 = family1,
+                            Family2 = family2,
+                            Family3 = family3,
+                            RespawnInterval = spawn.RespawnSeconds,
+                            HPValue = mon.Hp,
+                            DSValue = mon.Ds,
+                            DEValue = mon.DefPower,
+                            EVValue = mon.Evasion,
+                            MSValue = mon.MoveSpeed,
+                            WSValue = mon.WalkSpeed,
+                            CTValue = mon.CriticalRate,
+                            ATValue = mon.AttPower,
+                            ASValue = mon.AttSpeed,
+                            ARValue = mon.AttRange,
+                            HTValue = mon.HitRate,
+                            BLValue = 0,
+                            Location = new MobLocationConfigDTO
+                            {
+                                Id = mobId,
+                                MobConfigId = mobId,
+                                MapId = (short)map.MapId,
+                                X = spawn.X,
+                                Y = spawn.Y
+                            },
+                            ExpReward = new MobExpRewardConfigDTO
+                            {
+                                Id = mobId,
+                                MobId = mobId,
+                                TamerExperience = mon.ExpMax,
+                                DigimonExperience = mon.ExpMax
+                            },
+                            DropReward = new MobDropRewardConfigDTO
+                            {
+                                Id = mobId,
+                                MobId = mobId
+                            },
+                            GameMapConfigId = map.MapId
+                        });
+                    }
                 }
             }
 

@@ -10,6 +10,7 @@ using DigitalWorldOnline.Commons.DTOs.Shop;
 using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Repositories.Admin;
 using DigitalWorldOnline.Game.Managers;
+using DigitalWorldOnline.Game.Services;
 using DigitalWorldOnline.GameHost;
 using DigitalWorldOnline.GameHost.EventsServer;
 using DigitalWorldOnline.Infraestructure;
@@ -59,6 +60,8 @@ namespace DigitalWorldOnline.Game
                 .UseEnvironment("Development")
                 .ConfigureServices((context, services) =>
                 {
+                    services.AddScoped<StoragePersistenceDualWriteCoordinator>();
+
                     services.AddDsoDatabase(context.Configuration);
 
                     services.AddScoped<IAdminQueriesRepository, AdminQueriesRepository>();
@@ -89,6 +92,7 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<HotTimeService>();
                     services.AddSingleton<DailyEventService>();
                     services.AddSingleton<AttendanceService>();
+                    services.AddSingleton<OwnerStorageFlushService>();
 
                     services.AddSingleton<EventQueueManager>();
                     
@@ -124,6 +128,7 @@ namespace DigitalWorldOnline.Game
                     services.AddSingleton<NatureBinLoader>();
                     services.AddSingleton<MonsterBinLoader>();
                     services.AddSingleton<MapBinLoader>();
+                    services.AddSingleton<ItemListBinLoader>();
 
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
                     services.AddSingleton<IProcessor, GamePacketProcessor>();
@@ -161,6 +166,7 @@ namespace DigitalWorldOnline.Game
             var nature = host.Services.GetRequiredService<NatureBinLoader>().Load();
             var monster = host.Services.GetRequiredService<MonsterBinLoader>().Load();
             var mapBin = host.Services.GetRequiredService<MapBinLoader>().Load();
+            var itemList = host.Services.GetRequiredService<ItemListBinLoader>().Load();
             // Element-vs-element + attribute-vs-attribute combat multipliers come from
             // Nature.bin — accessed via Utils.GetElementDelta / GetAttributePoint, which
             // drive the boolean HasElementAdvantage / HasAttributeAdvantage extension
@@ -214,6 +220,19 @@ namespace DigitalWorldOnline.Game
             serilog.Information(
                 "Loaded map bins: MapList={Maps}, MapPortal={PortalMaps}, MapRegion={RegionMaps}, MapMonsterList={MonsterMaps}",
                 mapBin.MapsById.Count, mapBin.PortalsBySourceMapId.Count, mapBin.RegionsByMapId.Count, mapBin.MonstersByMapId.Count);
+            serilog.Information(
+                "Loaded ItemList.bin static sections: Items={Items}, ItemTap={ItemTap}, CoolTime={CoolTime}, MapDisp={MapDisp}, MapTypeName={MapTypeName}, Rank={Rank}, Element1={Element1}, Element2={Element2}, Exchange={Exchange}, AccessoryOption={AccessoryOption}, AccessoryEnchant={AccessoryEnchant}",
+                itemList.Sections.Items,
+                itemList.Sections.ItemTap,
+                itemList.Sections.CoolTime,
+                itemList.Sections.MapDisp,
+                itemList.Sections.MapTypeName,
+                itemList.Sections.Rank,
+                itemList.Sections.ElementItem1,
+                itemList.Sections.ElementItem2,
+                itemList.Sections.Exchange,
+                itemList.Sections.AccessoryOption,
+                itemList.Sections.AccessoryEnchant);
 
             return host;
         }

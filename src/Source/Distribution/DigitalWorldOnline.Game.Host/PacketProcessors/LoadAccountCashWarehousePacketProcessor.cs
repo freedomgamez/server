@@ -11,6 +11,7 @@ using DigitalWorldOnline.Commons.Packets.GameServer.Combat;
 using DigitalWorldOnline.Commons.Packets.Items;
 using MediatR;
 using Serilog;
+using System.Linq;
 
 namespace DigitalWorldOnline.Game.PacketProcessors
 {
@@ -29,8 +30,18 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         public async Task Process(GameClient client, byte[] packetData)
         {
+            var enabled = client.Tamer.AccountCashWarehouse.Items.Where(x => x.ItemId > 0).ToList();
+            var missingInfo = enabled.Where(x => x.ItemInfo == null).Take(10).ToList();
+            if (missingInfo.Any())
+            {
+                var sample = string.Join(", ", missingInfo.Select(x => $"slot={x.Slot} item={x.ItemId} amt={x.Amount}"));
+                _logger.Warning(
+                    "LoadAccountCashWarehouse diagnostics: tamer {TamerId} has {MissingCount}/{EnabledCount} cash-warehouse items with null ItemInfo. Sample: {Sample}",
+                    client.TamerId, enabled.Count(x => x.ItemInfo == null), enabled.Count, sample);
+            }
+
             client.Send(new LoadAccountWarehousePacket(client.Tamer.AccountCashWarehouse));
-            _logger.Debug($"Sending loadaccountwarehouse packet for character {client.TamerId}...");
+            _logger.Debug($"Sending loadaccountcashwarehouse packet for character {client.TamerId}...");
         }
     }
 }

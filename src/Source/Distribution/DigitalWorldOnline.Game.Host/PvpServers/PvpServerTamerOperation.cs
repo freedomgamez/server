@@ -98,11 +98,15 @@ namespace DigitalWorldOnline.GameHost
                             .ToList();
 
                         buffsToRemove.ForEach(buffToRemove =>
-                        { map.BroadcastForTamerViewsAndSelf(tamer.Id, new RemoveBuffPacket(tamer.GeneralHandler, buffToRemove.BuffId).Serialize()); });
+                        {
+                            tamer.BuffList.Remove(buffToRemove.BuffId);
+                            map.BroadcastForTamerViewsAndSelf(tamer.Id, new RemoveBuffPacket(tamer.GeneralHandler, buffToRemove.BuffId).Serialize());
+                        });
 
                         if (buffsToRemove.Any())
                         {
                             client?.Send(new UpdateStatusPacket(tamer));
+                            map.BroadcastForTamerViewsAndSelf(tamer.Id, new UpdateMovementSpeedPacket(tamer).Serialize());
                             map.BroadcastForTargetTamers(map.TamersView[tamer.Id], new UpdateCurrentHPRatePacket(tamer.GeneralHandler, tamer.HpRate).Serialize());
                             _sender.Send(new UpdateCharacterBuffListCommand(tamer.BuffList));
                         }
@@ -115,11 +119,15 @@ namespace DigitalWorldOnline.GameHost
                             .ToList();
 
                         buffsToRemove.ForEach(buffToRemove =>
-                        { map.BroadcastForTamerViewsAndSelf(tamer.Id, new RemoveBuffPacket(tamer.Partner.GeneralHandler, buffToRemove.BuffId).Serialize()); });
+                        {
+                            tamer.Partner.BuffList.Remove(buffToRemove.BuffId);
+                            map.BroadcastForTamerViewsAndSelf(tamer.Id, new RemoveBuffPacket(tamer.Partner.GeneralHandler, buffToRemove.BuffId).Serialize());
+                        });
 
                         if (buffsToRemove.Any())
                         {
                             client?.Send(new UpdateStatusPacket(tamer));
+                            map.BroadcastForTamerViewsAndSelf(tamer.Id, new UpdateMovementSpeedPacket(tamer).Serialize());
                             map.BroadcastForTargetTamers(map.TamersView[tamer.Id], new UpdateCurrentHPRatePacket(tamer.Partner.GeneralHandler, tamer.Partner.HpRate).Serialize());
 
                             _sender.Send(new UpdateDigimonBuffListCommand(tamer.Partner.BuffList));
@@ -312,41 +320,18 @@ namespace DigitalWorldOnline.GameHost
             var levelBonusMultiplier = tamer.Partner.Level > tamer.TargetPartner.Level ?
                 (0.01f * (tamer.Partner.Level - tamer.TargetPartner.Level)) : 0; //TODO: externalizar no portal
 
-            var attributeMultiplier = 0.00;
-            if (tamer.Partner.BaseInfo.Attribute.HasAttributeAdvantage(tamer.TargetPartner.BaseInfo.Attribute))
-            {
-                var vlrAtual = tamer.Partner.GetAttributeExperience();
-                var bonusMax = 50.0; //TODO: externalizar?
-                var expMax = 10000; //TODO: externalizar?
-
-                attributeMultiplier = (bonusMax * vlrAtual) / expMax;
-            }
-            else if (tamer.TargetPartner.BaseInfo.Attribute.HasAttributeAdvantage(tamer.Partner.BaseInfo.Attribute))
-            {
-                attributeMultiplier = -0.25;
-            }
-
-            var elementMultiplier = 0.00;
-            if (tamer.Partner.BaseInfo.Element.HasElementAdvantage(tamer.TargetPartner.BaseInfo.Element))
-            {
-                var vlrAtual = tamer.Partner.GetElementExperience();
-                var bonusMax = 0.5; //TODO: externalizar?
-                var expMax = 10000; //TODO: externalizar?
-
-                elementMultiplier = (bonusMax * vlrAtual) / expMax;
-            }
-            else if (tamer.TargetPartner.BaseInfo.Element.HasElementAdvantage(tamer.Partner.BaseInfo.Element))
-            {
-                elementMultiplier = -0.25;
-            }
+            baseDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                baseDamage,
+                tamer.Partner.BaseInfo.Attribute,
+                tamer.TargetPartner.BaseInfo.Attribute,
+                tamer.Partner.BaseInfo.Element,
+                tamer.TargetPartner.BaseInfo.Element);
 
             baseDamage /= blocked ? 2 : 1;
 
             return (int)Math.Floor(baseDamage +
                 (baseDamage * critBonusMultiplier) +
-                (baseDamage * levelBonusMultiplier) +
-                (baseDamage * attributeMultiplier) +
-                (baseDamage * elementMultiplier));
+                (baseDamage * levelBonusMultiplier));
         }
     }
 }

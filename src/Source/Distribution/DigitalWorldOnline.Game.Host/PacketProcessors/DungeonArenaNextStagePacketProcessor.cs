@@ -76,7 +76,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                             await Task.Delay(time);
 
-                            var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(targetClients.Id)));
+                            var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(targetClients.MapId)));
 
                             if (mapMobs != null)
                             {
@@ -218,7 +218,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                         await Task.Delay(time);
 
-                        var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(targetClients.Id)));
+                        var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(targetClients.MapId)));
 
                         if (mapMobs != null)
                         {

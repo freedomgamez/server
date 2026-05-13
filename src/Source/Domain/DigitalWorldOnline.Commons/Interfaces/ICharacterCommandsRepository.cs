@@ -136,5 +136,7 @@ namespace DigitalWorldOnline.Commons.Interfaces
         Task UpdateTamerTimeRewardAsync(TimeReward timeReward);
 
         Task UpdateCharacterArenaDailyPointsAsync(CharacterArenaDailyPointsModel points);
+
+        Task EnsureCharacterItemListAsync(long characterId, ItemListEnum type);
     }
 }

@@ -13,6 +13,7 @@ using DigitalWorldOnline.Commons.Extensions;
 using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Models.Account;
 using DigitalWorldOnline.Commons.Models.Asset;
+using DigitalWorldOnline.Commons.Models.Base;
 using DigitalWorldOnline.Commons.Models.Character;
 using DigitalWorldOnline.Commons.Models.Digimon;
 using DigitalWorldOnline.Commons.Packets.CharacterServer;
@@ -84,8 +85,11 @@ namespace DigitalWorldOnline.Character
                         var accountId = packet.ReadUInt();
 
                         DebugLog($"Getting account {accountId} character list...");
-                          var characters = _mapper.Map<List<CharacterModel>>(
+                        var characters = _mapper.Map<List<CharacterModel>>(
                             await _sender.Send(new CharactersByAccountIdQuery(accountId)));
+
+                        await EnsureRequiredAccountListsAsync(accountId);
+                        await EnsureRequiredCharacterListsAsync(characters);
 
                         //characters.ForEach(character => 
                         //{
@@ -266,6 +270,9 @@ namespace DigitalWorldOnline.Character
                         DebugLog($"Updating account welcome flag...");
                         await _sender.Send(new UpdateAccountWelcomeFlagCommand(character.AccountId));
 
+                        await EnsureRequiredAccountListsAsync(client.AccountId);
+                        await EnsureRequiredCharacterListsAsync(new List<CharacterModel> { character });
+
                         DebugLog($"Sending selected server info...");
                         client.Send(new ConnectGameServerInfoPacket(
                             _configuration[GameServerAddress],
@@ -285,6 +292,59 @@ namespace DigitalWorldOnline.Character
                     _logger.Warning($"Unknown packet. Type: {packet.Type} Length: {packet.Length}.");
                     break;
             }
+        }
+
+        private async Task EnsureRequiredCharacterListsAsync(List<CharacterModel> characters)
+        {
+            var requiredTypes = new[]
+            {
+                ItemListEnum.Equipment,
+                ItemListEnum.Inventory,
+                ItemListEnum.Warehouse,
+                ItemListEnum.Chipsets,
+                ItemListEnum.JogressChipset,
+                ItemListEnum.Digivice,
+                ItemListEnum.TamerSkill,
+                ItemListEnum.RewardWarehouse,
+                ItemListEnum.GiftWarehouse,
+                ItemListEnum.ConsignedWarehouse,
+                ItemListEnum.TamerShop,
+                ItemListEnum.ConsignedShop
+            };
+
+            foreach (var character in characters)
+            {
+                var loadedTypes = character.ItemList.Select(x => x.Type).ToHashSet();
+                foreach (var type in requiredTypes)
+                {
+                    if (!loadedTypes.Contains(type))
+                    {
+                        await _sender.Send(new CreateCharacterItemListCommand(character.Id, type));
+                        loadedTypes.Add(type);
+                    }
+                }
+            }
+
+            for (var i = 0; i < characters.Count; i++)
+            {
+                var refreshed = _mapper.Map<CharacterModel>(await _sender.Send(new CharacterByIdQuery(characters[i].Id)));
+                if (refreshed != null)
+                    characters[i] = refreshed;
+            }
+        }
+
+        private async Task EnsureRequiredAccountListsAsync(long accountId)
+        {
+            var requiredTypes = new[]
+            {
+                ItemListEnum.AccountWarehouse,
+                ItemListEnum.CashWarehouse,
+                ItemListEnum.ShopWarehouse,
+                ItemListEnum.BuyHistory
+            };
+
+            foreach (var type in requiredTypes)
+                await _sender.Send(new CreateAccountItemListCommand(accountId, type));
         }
 
         /// <summary>

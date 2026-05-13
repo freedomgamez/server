@@ -8,6 +8,7 @@ using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Packets.Chat;
 using DigitalWorldOnline.Commons.Packets.MapServer;
 using DigitalWorldOnline.Game.Managers;
+using DigitalWorldOnline.Game.Services;
 using DigitalWorldOnline.GameHost;
 using MediatR;
 using Microsoft.Extensions.Configuration;
@@ -24,7 +25,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly ISender _sender;
         private readonly ILogger _logger;
         private readonly PartyManager _partyManager;
-        private const string GameServerAddress = "GameServer:Address";
+        private readonly OwnerStorageFlushService _ownerStorageFlushService;
         private const string GamerServerPublic = "GameServer:PublicAddress";
         private const string GameServerPort = "GameServer:Port";
 
@@ -33,13 +34,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             IConfiguration configuration,
             ISender sender,
             ILogger logger,
-            PartyManager partyManager)
+            PartyManager partyManager,
+            OwnerStorageFlushService ownerStorageFlushService)
         {
             _configuration = configuration;
             _dungeonServer = dungeonServer;
             _sender = sender;
             _logger = logger;
             _partyManager = partyManager;
+            _ownerStorageFlushService = ownerStorageFlushService;
         }
 
         public async Task Process(GameClient client, byte[] packetData)
@@ -69,6 +72,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                     if(targetClient != null)
                     {
+                        await _ownerStorageFlushService.FlushForTransitionAsync(targetClient);
                         _dungeonServer.RemoveClient(targetClient);
 
 
@@ -95,6 +99,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 }
             }
 
+            await _ownerStorageFlushService.FlushForTransitionAsync(client);
             _dungeonServer.RemoveClient(client);
 
             client.Tamer.NewLocation(3, destination.X, destination.Y);

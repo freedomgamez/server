@@ -77,28 +77,9 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Admin
             return server;
         }
 
-        public async Task<MapRegionAssetDTO> AddSpawnPointAsync(MapRegionAssetDTO spawnPoint, int mapId)
-        {
-            var mapRegionList = await _context.MapRegionListAsset
-                .AsNoTracking()
-                .Include(x => x.Regions)
-                .SingleOrDefaultAsync(x => x.MapId == mapId);
-
-            if (mapRegionList != null)
-            {
-                spawnPoint.MapRegionListId = mapRegionList.Id;
-
-                mapRegionList.Regions.Add(spawnPoint);
-
-                _context.Update(mapRegionList);
-
-                _context.MapRegionAsset.Add(spawnPoint);
-
-                await _context.SaveChangesAsync();
-            }
-
-            return spawnPoint;
-        }
+        public Task<MapRegionAssetDTO> AddSpawnPointAsync(MapRegionAssetDTO spawnPoint, int mapId) =>
+            Task.FromException<MapRegionAssetDTO>(new NotSupportedException(
+                "Spawn point static data is bin-driven now. Edit MapRegion.bin via BinTool."));
 
         public async Task<UserDTO> AddUserAsync(UserDTO user)
         {
@@ -202,19 +183,9 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Admin
             }
         }
 
-        public async Task DeleteSpawnPointAsync(long id)
-        {
-            var dto = await _context.MapRegionAsset
-                .AsNoTracking()
-                .SingleOrDefaultAsync(x => x.Id == id);
-
-            if (dto != null)
-            {
-                _context.Remove(dto);
-
-                _context.SaveChanges();
-            }
-        }
+        public Task DeleteSpawnPointAsync(long id) =>
+            Task.FromException(new NotSupportedException(
+                "Spawn point static data is bin-driven now. Edit MapRegion.bin via BinTool."));
 
         public async Task DeleteUserAsync(long id)
         {
@@ -396,24 +367,9 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Admin
             }
         }
 
-        public async Task UpdateSpawnPointAsync(MapRegionAssetDTO spawnPoint, long mapId)
-        {
-            var dto = await _context.MapRegionAsset
-                .AsNoTracking()
-                .SingleOrDefaultAsync(x => x.Id == spawnPoint.Id);
-
-            if (dto != null)
-            {
-                dto.X = spawnPoint.X;
-                dto.Y = spawnPoint.Y;
-                dto.Index = spawnPoint.Index;
-                dto.Name = spawnPoint.Name;
-
-                _context.Update(dto);
-
-                _context.SaveChanges();
-            }
-        }
+        public Task UpdateSpawnPointAsync(MapRegionAssetDTO spawnPoint, long mapId) =>
+            Task.FromException(new NotSupportedException(
+                "Spawn point static data is bin-driven now. Edit MapRegion.bin via BinTool."));
 
         public async Task UpdateUserAsync(UserDTO user)
         {

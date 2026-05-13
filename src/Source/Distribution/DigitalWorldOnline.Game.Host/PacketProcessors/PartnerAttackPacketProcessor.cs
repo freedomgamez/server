@@ -919,15 +919,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         private static int CalculateFinalDamage(GameClient client, MobConfigModel? targetMob, out double critBonusMultiplier, out bool blocked)
         {
-            var multiplier = 1;
-
-            if (client.Tamer.Partner.BaseInfo.Attribute.
-                HasAttributeAdvantage(targetMob.Attribute)
-                || client.Tamer.Partner.BaseInfo.Element
-                .HasElementAdvantage(targetMob.Element))
-                multiplier = 2;
-
-            var baseDamage = client.Tamer.Partner.AT * multiplier;
+            var baseDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                client.Tamer.Partner.AT,
+                client.Tamer.Partner.BaseInfo.Attribute,
+                targetMob.Attribute,
+                client.Tamer.Partner.BaseInfo.Element,
+                targetMob.Element);
 
             var random = new Random();
             // Gere um valor aleatório entre 0% e 5% a mais do valor original
@@ -993,15 +990,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         }
         private static int CalculateFinalDamage(GameClient client, SummonMobModel targetMob, out double critBonusMultiplier, out bool blocked)
         {
-            var multiplier = 1;
-
-            if (client.Tamer.Partner.BaseInfo.Attribute.
-                HasAttributeAdvantage(targetMob.Attribute)
-                || client.Tamer.Partner.BaseInfo.Element
-                .HasElementAdvantage(targetMob.Element))
-                multiplier = 2;
-
-            var baseDamage = client.Tamer.Partner.AT * multiplier;
+            var baseDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                client.Tamer.Partner.AT,
+                client.Tamer.Partner.BaseInfo.Attribute,
+                targetMob.Attribute,
+                client.Tamer.Partner.BaseInfo.Element,
+                targetMob.Element);
 
             var random = new Random();
             // Gere um valor aleatório entre 0% e 5% a mais do valor original
@@ -1080,41 +1074,18 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var levelBonusMultiplier = client.Tamer.Partner.Level > targetPartner.Level ?
                 (0.01f * (client.Tamer.Partner.Level - targetPartner.Level)) : 0; //TODO: externalizar no portal
 
-            var attributeMultiplier = 0.00;
-            if (client.Tamer.Partner.BaseInfo.Attribute.HasAttributeAdvantage(targetPartner.BaseInfo.Attribute))
-            {
-                var vlrAtual = client.Tamer.Partner.GetAttributeExperience();
-                var bonusMax = 50.0; //TODO: externalizar?
-                var expMax = 10000; //TODO: externalizar?
-
-                attributeMultiplier = (bonusMax * vlrAtual) / expMax;
-            }
-            else if (targetPartner.BaseInfo.Attribute.HasAttributeAdvantage(client.Tamer.Partner.BaseInfo.Attribute))
-            {
-                attributeMultiplier = -0.25;
-            }
-
-            var elementMultiplier = 0.00;
-            if (client.Tamer.Partner.BaseInfo.Element.HasElementAdvantage(targetPartner.BaseInfo.Element))
-            {
-                var vlrAtual = client.Tamer.Partner.GetElementExperience();
-                var bonusMax = 0.50; //TODO: externalizar?
-                var expMax = 10000; //TODO: externalizar?
-
-                elementMultiplier = (bonusMax * vlrAtual) / expMax;
-            }
-            else if (targetPartner.BaseInfo.Element.HasElementAdvantage(client.Tamer.Partner.BaseInfo.Element))
-            {
-                elementMultiplier = -0.25;
-            }
+            baseDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                baseDamage,
+                client.Tamer.Partner.BaseInfo.Attribute,
+                targetPartner.BaseInfo.Attribute,
+                client.Tamer.Partner.BaseInfo.Element,
+                targetPartner.BaseInfo.Element);
 
             baseDamage /= blocked ? 2 : 1;
 
             return (int)Math.Floor(baseDamage +
                 (baseDamage * critBonusMultiplier) +
-                (baseDamage * levelBonusMultiplier) +
-                (baseDamage * attributeMultiplier) +
-                (baseDamage * elementMultiplier));
+                (baseDamage * levelBonusMultiplier));
         }
 
         public static int GetCurrentDamage(GameClient client, MobConfigModel? targetMob)
@@ -1128,30 +1099,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var ResultDamageDoubleAdvantage = 0;
             double MultiplierAttribute = 0;
 
-            var attributeVantage = client.Tamer.Partner.BaseInfo.Attribute.
-                HasAttributeAdvantage(client.Tamer.TargetMob.Attribute);
-            var elementVantage = client.Tamer.Partner.BaseInfo.Element
-                .HasElementAdvantage(client.Tamer.TargetMob.Element);
-
-
-            ResultDamage = ResultAT + (int)Math.Floor((double)0);
+            ResultDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                ResultAT,
+                client.Tamer.Partner.BaseInfo.Attribute,
+                client.Tamer.TargetMob.Attribute,
+                client.Tamer.Partner.BaseInfo.Element,
+                client.Tamer.TargetMob.Element);
             double addedCriticalDamage = ResultDamage * 0.8;
             addedCriticalDamage *= (1 + ((criticalDamageValue + 0) / 100.0));
             ResultCriticalDamage = ResultDamage + (int)Math.Floor(addedCriticalDamage);
-
-            if (client.Tamer.Partner.AttributeExperience.CurrentAttributeExperience && attributeVantage)
-            {
-
-                MultiplierAttribute = (2 + ((client.Tamer.Partner.ATT) / 200.0));
-
-                ResultDamageDoubleAdvantage = (int)Math.Floor(0 + (MultiplierAttribute * ResultAT));
-
-            }
-            else if (client.Tamer.Partner.AttributeExperience.CurrentElementExperience && elementVantage)
-            {
-                MultiplierAttribute = 2;
-                ResultDamageDoubleAdvantage = (int)Math.Floor(0 + (MultiplierAttribute * ResultAT));
-            }
 
             double FinalValue = ResultCriticalDamage + ResultDamageDoubleAdvantage;
 
@@ -1175,30 +1131,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var ResultDamageDoubleAdvantage = 0;
             double MultiplierAttribute = 0;
 
-            var attributeVantage = client.Tamer.Partner.BaseInfo.Attribute.
-                HasAttributeAdvantage(client.Tamer.TargetMob.Attribute);
-            var elementVantage = client.Tamer.Partner.BaseInfo.Element
-                .HasElementAdvantage(client.Tamer.TargetMob.Element);
-
-
-            ResultDamage = ResultAT + (int)Math.Floor((double)0);
+            ResultDamage = UtilitiesFunctions.ApplyNatureMatrixDamage(
+                ResultAT,
+                client.Tamer.Partner.BaseInfo.Attribute,
+                client.Tamer.TargetMob.Attribute,
+                client.Tamer.Partner.BaseInfo.Element,
+                client.Tamer.TargetMob.Element);
             double addedCriticalDamage = ResultDamage * 0.8;
             addedCriticalDamage *= (1 + ((criticalDamageValue + 0) / 100.0));
             ResultCriticalDamage = ResultDamage + (int)Math.Floor(addedCriticalDamage);
-
-            if (client.Tamer.Partner.AttributeExperience.CurrentAttributeExperience && attributeVantage)
-            {
-
-                MultiplierAttribute = (2 + ((client.Tamer.Partner.ATT) / 200.0));
-
-                ResultDamageDoubleAdvantage = (int)Math.Floor(0 + (MultiplierAttribute * ResultAT));
-
-            }
-            else if (client.Tamer.Partner.AttributeExperience.CurrentElementExperience && elementVantage)
-            {
-                MultiplierAttribute = 2;
-                ResultDamageDoubleAdvantage = (int)Math.Floor(0 + (MultiplierAttribute * ResultAT));
-            }
 
             double FinalValue = ResultCriticalDamage + ResultDamageDoubleAdvantage;
 

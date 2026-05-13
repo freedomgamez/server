@@ -33,10 +33,12 @@ namespace DigitalWorldOnline.Commons.Packets.CharacterServer
                 WriteString(character.Partner.Name);
                 WriteShort(character.Partner.Size);
 
-                //TODO: Ver o que esses 2 mudam
-                WriteShort(0); //??
-                WriteShort(0); //??
+                // Keep legacy 6-byte tail for this client build:
+                // u2 patLeader + n4 reserved/relocate.
+                // (Do NOT send digimonEffectType here unless the client parser
+                // is built with the matching partssystem layout.)
                 WriteShort(character.SealList.SealLeaderId);
+                WriteInt(0);
             }
 
             WriteByte(99);

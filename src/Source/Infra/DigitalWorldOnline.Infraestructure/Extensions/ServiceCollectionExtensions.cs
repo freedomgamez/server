@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System;
 
 namespace DigitalWorldOnline.Infraestructure.Extensions
 {
@@ -15,7 +16,10 @@ namespace DigitalWorldOnline.Infraestructure.Extensions
                     $"Configuration value '{DatabaseConnectionKey}' is missing. " +
                     "Set it in appsettings.Development.json or via the DSO_Database__Connection environment variable.");
 
-            services.AddDbContext<DatabaseContext>(options => options.UseDsoMySql(cs));
+            services.AddDbContext<DatabaseContext>(options =>
+            {
+                options.UseDsoMySql(cs);
+            });
             return services;
         }
 

@@ -29,6 +29,7 @@ using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json.Linq;
 using Serilog;
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics.Eventing.Reader;
 
 namespace DigitalWorldOnline.Game.PacketProcessors
@@ -44,6 +45,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly DungeonsServer _dungeonServer;
         private readonly AssetsLoader _assets;
         private readonly ConfigsLoader _configs;
+        private readonly ItemListBinLoader _itemListBinLoader;
         private readonly ExpManager _expManager;
         private readonly FatigueService _fatigueService;   // FATIGUE_HOOK
         private readonly DMBaseBinLoader _dmBase;
@@ -51,12 +53,14 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly ISender _sender;
         private readonly ILogger _logger;
         private readonly IConfiguration _configuration;
+        private static readonly ConcurrentDictionary<(long TamerId, int GroupKey), DateTime> _itemCooldownByTamer = new();
 
         public ItemConsumePacketProcessor(
             StatusManager statusManager,
             MapServer mapServer,
             DungeonsServer dungeonsServer,
             AssetsLoader assets,
+            ItemListBinLoader itemListBinLoader,
             ExpManager expManager,
             FatigueService fatigueService,   // FATIGUE_HOOK
             ConfigsLoader configs,
@@ -72,6 +76,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _expManager = expManager;
             _fatigueService = fatigueService;   // FATIGUE_HOOK
             _assets = assets;
+            _itemListBinLoader = itemListBinLoader;
             _configs = configs;
             _dmBase = dmBase;
             _digimonList = digimonList;
@@ -101,6 +106,18 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 client.Send(new SystemMessagePacket($"Invalid item at slot {itemSlot}."));
                 return;
             }
+
+            if (!ValidateItemTap(client, itemSlot, targetItem))
+                return;
+
+            if (!ValidateExchangeBoundary(client, itemSlot, targetItem))
+                return;
+
+            if (!ValidateElementMaterialBoundary(client, itemSlot, targetItem))
+                return;
+
+            if (!ValidateItemCoolTime(client, itemSlot, targetItem))
+                return;
 
           
             if (targetItem.ItemInfo.Type == 60)
@@ -836,45 +853,17 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         private async Task BombTeleport(GameClient client, short itemSlot, ItemModel targetIte)
         {
-            Dictionary<int, int> itemMapIdMapping = new Dictionary<int, int> {
-                // Esse é um dicionário de ID de mapas e ID de itens
+            var itemList = _itemListBinLoader.Data;
+            var mapDisp = itemList.MapDisp.FirstOrDefault(x => x.ItemType == targetIte.ItemInfo.Type);
+            if (mapDisp != null)
+            {
+                int mapId = (int)mapDisp.MapId;
+                if (!itemList.MapTypeName.Any(x => x.Type == targetIte.ItemInfo.Type))
                 {
-                    25001, // ID do item
-                    3 // ID do mapa
-                },
-                {
-                    9025,
-                    3
-                },
-                {
-                    25003,
-                    1100
-                },
-                {
-                    9027,
-                    1100
-                },
-                {
-                    25006,
-                    2100
-                },
-                {
-                    25019,
-                    2100
-                },
-                {
-                    25004,
-                    1103
-                },
-                {
-                    9028,
-                    1103
+                    client.Send(new ItemConsumeFailPacket(itemSlot, targetIte.ItemInfo.Type, ItemConsumeFailEnum.ConditionNotMet));
+                    return;
                 }
 
-            };
-            // Verificar o ID do item e o ID do mapa que ele vai teleportar
-            if (itemMapIdMapping.TryGetValue(targetIte.ItemId, out int mapId))
-            {
                 // if (client.Tamer.Location.MapId == mapId)
                 // {
                 //     client.Send(new SystemMessagePacket($"You are already in this map."));
@@ -930,9 +919,65 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
             else
             {
-                Console.WriteLine($"ItemID {targetIte.ItemId} não encontrado no mapeamento.");
+                client.Send(new ItemConsumeFailPacket(itemSlot, targetIte.ItemInfo.Type, ItemConsumeFailEnum.InvalidArea));
             }
 
+        }
+
+        private bool ValidateItemTap(GameClient client, short itemSlot, ItemModel targetItem)
+        {
+            var taps = _itemListBinLoader.Data.ItemTap;
+            if (taps.Count == 0)
+                return true;
+
+            if (taps.Any(x => x.Type == targetItem.ItemInfo.Type))
+                return true;
+
+            client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type, ItemConsumeFailEnum.ConditionNotMet));
+            return false;
+        }
+
+        private bool ValidateItemCoolTime(GameClient client, short itemSlot, ItemModel targetItem)
+        {
+            var cool = _itemListBinLoader.Data.ItemCoolTime.FirstOrDefault(x => x.ItemType == targetItem.ItemInfo.Type);
+            if (cool == null || cool.CooldownSeconds <= 0)
+                return true;
+
+            int groupKey = cool.Group > 0 ? cool.Group : targetItem.ItemInfo.Type;
+            var now = DateTime.UtcNow;
+            var key = (client.TamerId, groupKey);
+            if (_itemCooldownByTamer.TryGetValue(key, out var lastUse))
+            {
+                var diff = (now - lastUse).TotalSeconds;
+                if (diff < cool.CooldownSeconds)
+                {
+                    client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type, ItemConsumeFailEnum.InCooldown));
+                    return false;
+                }
+            }
+
+            _itemCooldownByTamer[key] = now;
+            return true;
+        }
+
+        private bool ValidateElementMaterialBoundary(GameClient client, short itemSlot, ItemModel targetItem)
+        {
+            var itemId = (uint)targetItem.ItemId;
+            var itemList = _itemListBinLoader.Data;
+            if (!itemList.ElementItem1.Contains(itemId) && !itemList.ElementItem2.Contains(itemId))
+                return true;
+
+            client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type, ItemConsumeFailEnum.ConditionNotMet));
+            return false;
+        }
+
+        private bool ValidateExchangeBoundary(GameClient client, short itemSlot, ItemModel targetItem)
+        {
+            if (!_itemListBinLoader.Data.Exchange.Any(x => x.ItemType == targetItem.ItemInfo.Type))
+                return true;
+
+            client.Send(new ItemConsumeFailPacket(itemSlot, targetItem.ItemInfo.Type, ItemConsumeFailEnum.ConditionNotMet));
+            return false;
         }
         private async Task Fruits(GameClient client, short itemSlot, ItemModel targetItem)
         {
@@ -1531,7 +1576,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             if (!client.Tamer.BuffList.Buffs.Any(x => x.BuffId == BuffId))
                             {
 
-                                var duration = UtilitiesFunctions.RemainingTimeSeconds(Value2);
+                                var duration = Math.Max(1, Value2);
 
                                 var newCharacterBuff = CharacterBuffModel.Create(BuffId, Value1, Value2);
                                 newCharacterBuff.SetBuffInfo(buff);
@@ -1553,7 +1598,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                                     BuffInfo.SetDuration(Value2);
 
-                                    var duration = UtilitiesFunctions.RemainingTimeSeconds(BuffInfo.Duration);
+                                    var duration = BuffInfo.Duration == 0 ? unchecked((int)uint.MaxValue) : Math.Max(1, BuffInfo.Duration);
 
                                     _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
                                   new UpdateBuffPacket(client.Tamer.GeneralHandler, buff, (short)0, duration).Serialize());
@@ -1580,7 +1625,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             if (buff != null)
             {
-                var duration = UtilitiesFunctions.RemainingTimeSeconds(targetItem.ItemInfo.TimeInSeconds);
+                var duration = Math.Max(1, targetItem.ItemInfo.TimeInSeconds);
 
                 var newCharacterBuff = CharacterBuffModel.Create(buff.BuffId, buff.SkillId, targetItem.ItemInfo.TypeN, targetItem.ItemInfo.TimeInSeconds);
                 newCharacterBuff.SetBuffInfo(buff);
@@ -1646,7 +1691,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         {
                             client.Partner.BuffList.ForceExpired(newDigimonBuff.BuffId);
                             _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                                new RemoveBuffPacket(client.Partner.GeneralHandler, newCharacterBuff.BuffId).Serialize());
+                                new RemoveBuffPacket(client.Partner.GeneralHandler, newDigimonBuff.BuffId).Serialize());
 
                             client.Partner.BuffList.Add(newDigimonBuff);
                             _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,
@@ -1656,7 +1701,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         {
                             client.Partner.BuffList.ForceExpired(newDigimonBuff.BuffId);
                             _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                                new RemoveBuffPacket(client.Partner.GeneralHandler, newCharacterBuff.BuffId).Serialize());
+                                new RemoveBuffPacket(client.Partner.GeneralHandler, newDigimonBuff.BuffId).Serialize());
 
                             client.Partner.BuffList.Add(newDigimonBuff);
                             _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,

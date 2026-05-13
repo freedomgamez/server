@@ -3,6 +3,7 @@ using DigitalWorldOnline.Api.Dtos.Errors;
 using DigitalWorldOnline.Application.Admin.Commands;
 using DigitalWorldOnline.Application.Admin.Repositories;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.GameAssets.Mapping;
 using DigitalWorldOnline.Application.Extensions;
 using DigitalWorldOnline.Application.Services;
@@ -58,6 +59,7 @@ namespace DigitalWorldOnline.Api
             services.AddScoped<IRoutineRepository, RoutineRepository>();
             
             services.AddScoped<IEmailService, EmailService>();
+            services.AddSingleton<ItemListBinLoader>();
 
             services.AddTransient<Mediator>();
             services.AddSingleton<ISender, ScopedSender<Mediator>>();

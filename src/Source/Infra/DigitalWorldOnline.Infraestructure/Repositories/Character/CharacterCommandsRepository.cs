@@ -17,6 +17,9 @@ using MediatR;
 using DigitalWorldOnline.Commons.Models.Mechanics;
 using DigitalWorldOnline.Commons.DTOs.Events;
 using DigitalWorldOnline.Commons.Model.Character;
+using DigitalWorldOnline.Commons.Models.Base;
+using Microsoft.Extensions.Logging;
+using DigitalWorldOnline.Infraestructure.Repositories.Shared.ReadModels;
 
 namespace DigitalWorldOnline.Infraestructure.Repositories.Character
 {
@@ -24,22 +27,75 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Character
     {
         private readonly DatabaseContext _context;
         private readonly IMapper _mapper;
+        private readonly ILogger<CharacterCommandsRepository> _logger;
 
-        public CharacterCommandsRepository(DatabaseContext context, IMapper mapper)
+        public CharacterCommandsRepository(
+            DatabaseContext context,
+            IMapper mapper,
+            ILogger<CharacterCommandsRepository> logger)
         {
             _context = context;
             _mapper = mapper;
+            _logger = logger;
         }
 
         public async Task<long> AddCharacterAsync(CharacterModel character)
         {
             var dto = _mapper.Map<CharacterDTO>(character);
+            dto.ItemList = new List<ItemListDTO>();
 
             _context.Character.Add(dto);
 
             await _context.SaveChangesAsync();
 
+            var requiredTypes = new[]
+            {
+                ItemListEnum.Equipment,
+                ItemListEnum.Inventory,
+                ItemListEnum.Warehouse,
+                ItemListEnum.Chipsets,
+                ItemListEnum.JogressChipset,
+                ItemListEnum.Digivice,
+                ItemListEnum.TamerSkill,
+                ItemListEnum.RewardWarehouse,
+                ItemListEnum.GiftWarehouse,
+                ItemListEnum.ConsignedWarehouse,
+                ItemListEnum.TamerShop,
+                ItemListEnum.ConsignedShop
+            };
+
+            foreach (var type in requiredTypes)
+                await EnsureCharacterItemListAsync(dto.Id, type);
+
             return dto.Id;
+        }
+
+        public async Task EnsureCharacterItemListAsync(long characterId, ItemListEnum type)
+        {
+            var characterExists = await _context.Character
+                .AsNoTracking()
+                .AnyAsync(x => x.Id == characterId);
+            if (!characterExists)
+                return;
+
+            var existing = await _context.OwnerItemStorageCharacter
+                .AsNoTracking()
+                .AnyAsync(x => x.CharacterId == characterId && x.Type == (int)type);
+            if (existing)
+                return;
+
+            var storage = new OwnerItemStorageCharacterReadModel
+            {
+                CharacterId = characterId,
+                Type = (int)type,
+                Size = new ItemListModel(type).Size,
+                Bits = 0,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            _context.OwnerItemStorageCharacter.Add(storage);
+            await _context.SaveChangesAsync();
         }
 
         public async Task<DigimonDTO> AddDigimonAsync(DigimonModel digimon)
@@ -84,8 +140,6 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Character
                         .ThenInclude(y => y.Buffs)
                     .Include(x => x.SealList)
                         .ThenInclude(y => y.Seals)
-                    .Include(x => x.ItemList)
-                        .ThenInclude(y => y.Items)
                     .Include(x => x.Digimons)
                         .ThenInclude(y => y.Digiclone)
                     .Include(x => x.Digimons)
@@ -550,233 +604,520 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Character
 
         public async Task UpdateItemListBitsAsync(long itemListId, long bits)
         {
-            var dto = await _context.ItemLists
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == itemListId);
-
-            if (dto != null)
-            {
-                dto.Bits = bits;
-
-                _context.Update(dto);
-                _context.SaveChanges();
-            }
+            await UpsertOwnerListBitsAsync(itemListId, bits);
         }
 
         public async Task UpdateItemsAsync(List<ItemModel> items)
         {
-            await RemoveDeletedItems(items);
-            await AddOrUpdateItems(items);
-
-            _context.SaveChanges();
-        }
-
-        private async Task AddOrUpdateItems(List<ItemModel> items)
-        {
             if (!items.Any())
                 return;
 
-            var itemsCopy = items.ToList();
-
-            foreach (var item in itemsCopy)
-            {
-                var dto = await _context.Items
-                    .AsNoTracking()
-                    .Include(x => x.AccessoryStatus)
-                    .Include(x => x.SocketStatus)
-                    .FirstOrDefaultAsync(x => x.Id == item.Id);
-
-                if (dto != null)
-                {
-                    dto.Slot = item.Slot;
-                    dto.Amount = item.Amount;
-                    dto.ItemId = item.ItemId;
-                    dto.Duration = item.Duration;
-                    dto.EndDate = item.EndDate;
-                    dto.FirstExpired = item.FirstExpired;
-
-                    if (item.ItemListId > 0)
-                        dto.ItemListId = item.ItemListId;
-
-                    dto.RerollLeft = item.RerollLeft;
-                    dto.FamilyType = item.FamilyType;
-                    dto.Power = item.Power;
-
-                    dto.TamerShopSellPrice = item.TamerShopSellPrice;
-
-                    foreach (var dtoStatus in dto.AccessoryStatus)
-                    {
-                        var modelStatus = item.AccessoryStatus.First(x => x.Slot == dtoStatus.Slot);
-                        dtoStatus.Type = modelStatus.Type;
-                        dtoStatus.Value = modelStatus.Value;
-                    }
-                    foreach (var dtoStatus in dto.SocketStatus)
-                    {
-                        var modelStatus = item.SocketStatus.First(x => x.Slot == dtoStatus.Slot);
-                        dtoStatus.Type = modelStatus.Type;
-                        dtoStatus.AttributeId = modelStatus.AttributeId;
-                        dtoStatus.Value = modelStatus.Value;
-                    }
-
-
-                    _context.Update(dto);
-                }
-                else
-                {
-                    _context.Add(_mapper.Map<ItemDTO>(item));
-                }
-            }
-        }
-
-
-
-        private async Task RemoveDeletedItems(List<ItemModel> items)
-        {
-            if (!items.Any())
-                return;
-
-            var dtoItemsId = await _context.Items
-                .AsNoTracking()
-                .Where(x => x.ItemListId == items.First().ItemListId)
-                .ToListAsync();
-
-            var itemsToRemove = dtoItemsId
-                .Where(x => !items.Select(y => y.Id).Contains(x.Id))
+            var groupedByList = items
+                .GroupBy(x => x.ItemListId)
                 .ToList();
 
-            itemsToRemove.ForEach(itemToRemove =>
+            if (groupedByList.Count > 1)
             {
-                _context.Remove(itemToRemove);
-            });
+                throw new InvalidOperationException(
+                    $"UpdateItemsAsync received mixed ItemListId payload: {string.Join(",", groupedByList.Select(x => x.Key))}.");
+            }
+
+            foreach (var itemListGroup in groupedByList)
+                await UpsertOwnerItemsAsync(itemListGroup.ToList());
         }
 
         public async Task UpdateItemAccessoryStatusAsync(ItemModel item)
         {
-            var dto = await _context.Items
-                .AsNoTracking()
-                .Include(x => x.AccessoryStatus)
-                .FirstOrDefaultAsync(x => x.Id == item.Id);
-
-            if (dto != null)
-            {
-                dto.RerollLeft = item.RerollLeft;
-                dto.Power = item.Power;
-
-                foreach (var dtoStatus in dto.AccessoryStatus)
-                {
-                    var modelStatus = item.AccessoryStatus.First(x => x.Slot == dtoStatus.Slot);
-                    dtoStatus.Type = modelStatus.Type;
-                    dtoStatus.Value = modelStatus.Value;
-                }
-
-                _context.Update(dto);
-                _context.SaveChanges();
-            }
+            await UpsertOwnerItemsAsync(new List<ItemModel> { item });
         }
+
         public async Task UpdateItemSocketStatusAsync(ItemModel item)
         {
-            var dto = await _context.Items
-                .AsNoTracking()
-                .Include(x => x.SocketStatus)
-                .FirstOrDefaultAsync(x => x.Id == item.Id);
-
-            if (dto != null)
-            {
-                dto.RerollLeft = item.RerollLeft;
-                dto.Power = item.Power;
-
-                foreach (var dtoStatus in dto.SocketStatus)
-                {
-                    var modelStatus = item.SocketStatus.First(x => x.Slot == dtoStatus.Slot);
-                    dtoStatus.Type = modelStatus.Type;
-                    dtoStatus.AttributeId = modelStatus.AttributeId;
-                    dtoStatus.Value = modelStatus.Value;
-                }
-
-                _context.Update(dto);
-                _context.SaveChanges();
-            }
+            await UpsertOwnerItemsAsync(new List<ItemModel> { item });
         }
 
         public async Task UpdateItemAsync(ItemModel item)
         {
-            var dto = await _context.Items
-                .AsNoTracking()
-                .Include(x => x.AccessoryStatus)
-                .Include(x => x.SocketStatus)
-                .FirstOrDefaultAsync(x => x.Id == item.Id);
-
-            if (dto != null)
-            {
-                dto.Amount = item.Amount;
-                dto.ItemId = item.ItemId;
-                dto.Duration = item.Duration;
-                dto.EndDate = item.EndDate;
-                dto.FirstExpired = item.FirstExpired;
-
-                if (item.ItemListId > 0)
-                    dto.ItemListId = item.ItemListId;
-
-                dto.RerollLeft = item.RerollLeft;
-                dto.Power = item.Power;
-
-                dto.TamerShopSellPrice = item.TamerShopSellPrice;
-
-                foreach (var dtoStatus in dto.AccessoryStatus)
-                {
-                    var modelStatus = item.AccessoryStatus.First(x => x.Slot == dtoStatus.Slot);
-                    dtoStatus.Type = modelStatus.Type;
-                    dtoStatus.Value = modelStatus.Value;
-                }
-                foreach (var dtoStatus in dto.SocketStatus)
-                {
-                    var modelStatus = item.SocketStatus.First(x => x.Slot == dtoStatus.Slot);
-                    dtoStatus.Type = modelStatus.Type;
-                    dtoStatus.AttributeId = modelStatus.AttributeId;
-                    dtoStatus.Value = modelStatus.Value;
-                }
-
-
-                _context.Update(dto);
-                _context.SaveChanges();
-            }
+            await UpsertOwnerItemsAsync(new List<ItemModel> { item });
         }
 
         public async Task UpdateItemListSizeAsync(long itemListId, byte newSize)
         {
-            var dto = await _context.ItemLists.FirstOrDefaultAsync(x => x.Id == itemListId);
+            await UpsertOwnerListSizeAsync(itemListId, newSize);
+        }
 
-            if (dto != null)
+        private enum OwnerStorageKind
+        {
+            Character = 0,
+            Account = 1
+        }
+
+        private static (long OwnerId, int StorageType, OwnerStorageKind OwnerKind) ParseOwnerStorageToken(long itemListId)
+        {
+            var ownerId = itemListId / 1000L;
+            var storageType = (int)(itemListId % 1000L);
+
+            if (ownerId <= 0)
+                throw new InvalidOperationException($"Invalid ItemListId {itemListId}: missing owner token.");
+
+            if (!Enum.IsDefined(typeof(ItemListEnum), storageType))
+                throw new InvalidOperationException($"Invalid ItemListId {itemListId}: invalid ItemListEnum token {storageType}.");
+
+            var ownerKind = IsAccountStorageType(storageType)
+                ? OwnerStorageKind.Account
+                : OwnerStorageKind.Character;
+
+            return (ownerId, storageType, ownerKind);
+        }
+
+        private static bool IsAccountStorageType(int storageType)
+            => storageType is (int)ItemListEnum.ShopWarehouse
+                or (int)ItemListEnum.AccountWarehouse
+                or (int)ItemListEnum.CashWarehouse
+                or (int)ItemListEnum.BuyHistory;
+
+        private async Task UpsertOwnerListBitsAsync(long itemListId, long bits)
+        {
+            if (itemListId <= 0)
+                throw new ArgumentOutOfRangeException(nameof(itemListId), itemListId, "ItemListId must be greater than zero.");
+
+            var (ownerId, storageType, ownerKind) = ParseOwnerStorageToken(itemListId);
+
+            var updated = ownerKind == OwnerStorageKind.Account
+                ? await _context.OwnerItemStorageAccount
+                    .Where(x => x.AccountId == ownerId && x.Type == storageType)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.Bits, bits)
+                        .SetProperty(x => x.UpdatedAt, DateTime.UtcNow))
+                : await _context.OwnerItemStorageCharacter
+                    .Where(x => x.CharacterId == ownerId && x.Type == storageType)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.Bits, bits)
+                        .SetProperty(x => x.UpdatedAt, DateTime.UtcNow));
+
+            if (updated <= 0)
+                throw new InvalidOperationException($"Invalid ItemListId {itemListId}: owner storage list does not exist.");
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task UpsertOwnerListSizeAsync(long itemListId, byte newSize)
+        {
+            if (itemListId <= 0)
+                throw new ArgumentOutOfRangeException(nameof(itemListId), itemListId, "ItemListId must be greater than zero.");
+
+            var (ownerId, storageType, ownerKind) = ParseOwnerStorageToken(itemListId);
+
+            var updated = ownerKind == OwnerStorageKind.Account
+                ? await _context.OwnerItemStorageAccount
+                    .Where(x => x.AccountId == ownerId && x.Type == storageType)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.Size, (short)newSize)
+                        .SetProperty(x => x.UpdatedAt, DateTime.UtcNow))
+                : await _context.OwnerItemStorageCharacter
+                    .Where(x => x.CharacterId == ownerId && x.Type == storageType)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.Size, (short)newSize)
+                        .SetProperty(x => x.UpdatedAt, DateTime.UtcNow));
+
+            if (updated <= 0)
+                throw new InvalidOperationException($"Invalid ItemListId {itemListId}: owner storage list does not exist.");
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task UpsertOwnerItemsAsync(List<ItemModel> items)
+        {
+            if (!items.Any())
+                return;
+
+            var itemListId = items.First().ItemListId;
+            if (itemListId <= 0)
+                throw new ArgumentOutOfRangeException(nameof(itemListId), itemListId, "ItemListId must be greater than zero.");
+
+            if (items.Any(x => x.ItemListId != itemListId))
             {
-                dto.Size = newSize;
+                throw new InvalidOperationException(
+                    $"Update payload contains multiple ItemListId values: {string.Join(",", items.Select(x => x.ItemListId).Distinct())}.");
+            }
 
-                _context.Update(dto);
-                _context.SaveChanges();
+            var (ownerId, storageType, ownerKind) = ParseOwnerStorageToken(itemListId);
+            if (ownerKind == OwnerStorageKind.Account)
+            {
+                await UpsertOwnerItemsForAccountAsync(ownerId, storageType, items, sourceModelList: items.Select(x => x.ItemList).FirstOrDefault(x => x != null));
+                return;
+            }
+
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var sourceModelList = items
+                    .Select(x => x.ItemList)
+                    .FirstOrDefault(x => x != null);
+
+                if (sourceModelList != null && (int)sourceModelList.Type != storageType)
+                    throw new InvalidOperationException(
+                        $"ItemList type drift detected for list token {itemListId}: payload type={(int)sourceModelList.Type}.");
+
+                short? inferredSize = sourceModelList?.Size > 0 ? sourceModelList.Size : null;
+                long? inferredBits = sourceModelList?.Bits;
+
+                var storage = await _context.OwnerItemStorageCharacter
+                    .FirstOrDefaultAsync(x => x.CharacterId == ownerId && x.Type == storageType);
+                if (storage == null)
+                    throw new InvalidOperationException($"Invalid ItemListId {itemListId}: owner storage list does not exist for character {ownerId}.");
+
+                if (inferredSize.HasValue)
+                    storage.Size = inferredSize.Value;
+                if (inferredBits.HasValue)
+                    storage.Bits = inferredBits.Value;
+                storage.UpdatedAt = DateTime.UtcNow;
+                _context.OwnerItemStorageCharacter.Update(storage);
+
+                var slots = await _context.OwnerItemStorageCharacterSlots
+                    .Where(x => x.CharacterId == ownerId && x.Type == storageType)
+                    .ToListAsync();
+                var slotsByPosition = slots.ToDictionary(x => (int)x.Slot);
+
+                var instanceIds = slots
+                    .Where(x => x.ItemInstanceId.HasValue)
+                    .Select(x => x.ItemInstanceId!.Value)
+                    .ToHashSet();
+
+                var instances = await _context.OwnerItemStorageInstances
+                    .Where(x => instanceIds.Contains(x.Id))
+                    .ToDictionaryAsync(x => x.Id);
+
+                var accessoryStatuses = await _context.OwnerItemStorageAccessoryStatuses
+                    .Where(x => instanceIds.Contains(x.ItemInstanceId))
+                    .ToListAsync();
+                var socketStatuses = await _context.OwnerItemStorageSocketStatuses
+                    .Where(x => instanceIds.Contains(x.ItemInstanceId))
+                    .ToListAsync();
+
+                var seenInstanceIds = new HashSet<Guid>();
+                var accessoryStatusesToInsert = new List<OwnerItemStorageInstanceAccessoryStatusReadModel>();
+                var socketStatusesToInsert = new List<OwnerItemStorageInstanceSocketStatusReadModel>();
+
+                foreach (var item in items)
+                {
+                if (!slotsByPosition.TryGetValue(item.Slot, out var slot))
+                {
+                        slot = new OwnerItemStorageCharacterSlotReadModel
+                        {
+                            CharacterId = ownerId,
+                            Type = storageType,
+                            Slot = (short)item.Slot,
+                            UpdatedAt = DateTime.UtcNow
+                    };
+                    _context.OwnerItemStorageCharacterSlots.Add(slot);
+                    slotsByPosition[item.Slot] = slot;
+                }
+
+                slot.UpdatedAt = DateTime.UtcNow;
+
+                if (item.ItemId <= 0 || item.Amount <= 0)
+                {
+                    slot.ItemInstanceId = null;
+                    continue;
+                }
+
+                if (item.Id == Guid.Empty)
+                {
+                    slot.ItemInstanceId = null;
+                    continue;
+                }
+
+                slot.ItemInstanceId = item.Id;
+                seenInstanceIds.Add(item.Id);
+
+                if (!instances.TryGetValue(item.Id, out var instance))
+                {
+                    instance = new OwnerItemStorageInstanceReadModel
+                    {
+                        Id = item.Id,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.OwnerItemStorageInstances.Add(instance);
+                    instances[item.Id] = instance;
+                }
+
+                instance.ItemId = item.ItemId;
+                instance.Amount = item.Amount;
+                instance.Power = item.Power;
+                instance.RerollLeft = item.RerollLeft;
+                instance.FamilyType = item.FamilyType;
+                instance.Duration = item.Duration;
+                instance.EndDate = item.EndDate;
+                instance.FirstExpired = item.FirstExpired;
+                instance.TamerShopSellPrice = item.TamerShopSellPrice;
+
+                if (accessoryStatuses.Any(x => x.ItemInstanceId == item.Id))
+                {
+                    await _context.OwnerItemStorageAccessoryStatuses
+                        .Where(x => x.ItemInstanceId == item.Id)
+                        .ExecuteDeleteAsync();
+                    accessoryStatuses.RemoveAll(x => x.ItemInstanceId == item.Id);
+                }
+
+                if (socketStatuses.Any(x => x.ItemInstanceId == item.Id))
+                {
+                    await _context.OwnerItemStorageSocketStatuses
+                        .Where(x => x.ItemInstanceId == item.Id)
+                        .ExecuteDeleteAsync();
+                    socketStatuses.RemoveAll(x => x.ItemInstanceId == item.Id);
+                }
+
+                foreach (var status in item.AccessoryStatus)
+                {
+                    accessoryStatusesToInsert.Add(new OwnerItemStorageInstanceAccessoryStatusReadModel
+                    {
+                        Id = Guid.NewGuid(),
+                        ItemInstanceId = item.Id,
+                        Slot = status.Slot,
+                        Type = (short)status.Type,
+                        Value = status.Value
+                    });
+                }
+
+                foreach (var status in item.SocketStatus)
+                {
+                    socketStatusesToInsert.Add(new OwnerItemStorageInstanceSocketStatusReadModel
+                    {
+                        Id = Guid.NewGuid(),
+                        ItemInstanceId = item.Id,
+                        Slot = status.Slot,
+                        Type = (short)status.Type,
+                        AttributeId = status.AttributeId,
+                        Value = status.Value
+                    });
+                }
+                }
+
+                var referencedInstanceIds = slotsByPosition.Values
+                    .Where(x => x.ItemInstanceId.HasValue)
+                    .Select(x => x.ItemInstanceId!.Value)
+                    .ToHashSet();
+
+                var removedInstanceIds = instanceIds
+                    .Where(x => !referencedInstanceIds.Contains(x))
+                    .ToList();
+
+                foreach (var instanceId in removedInstanceIds)
+                {
+                    await _context.OwnerItemStorageAccessoryStatuses
+                        .Where(x => x.ItemInstanceId == instanceId)
+                        .ExecuteDeleteAsync();
+                    await _context.OwnerItemStorageSocketStatuses
+                        .Where(x => x.ItemInstanceId == instanceId)
+                        .ExecuteDeleteAsync();
+                    await _context.OwnerItemStorageInstances
+                        .Where(x => x.Id == instanceId)
+                        .ExecuteDeleteAsync();
+                }
+
+                await _context.SaveChangesAsync();
+
+                var persistedInstanceIds = await _context.OwnerItemStorageInstances
+                    .AsNoTracking()
+                    .Where(x => seenInstanceIds.Contains(x.Id))
+                    .Select(x => x.Id)
+                    .ToListAsync();
+                var persistedInstanceIdsSet = persistedInstanceIds.ToHashSet();
+
+                if (accessoryStatusesToInsert.Any())
+                    _context.OwnerItemStorageAccessoryStatuses.AddRange(
+                        accessoryStatusesToInsert.Where(x => persistedInstanceIdsSet.Contains(x.ItemInstanceId)));
+
+                if (socketStatusesToInsert.Any())
+                    _context.OwnerItemStorageSocketStatuses.AddRange(
+                        socketStatusesToInsert.Where(x => persistedInstanceIdsSet.Contains(x.ItemInstanceId)));
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        private async Task UpsertOwnerItemsForAccountAsync(long accountId, int storageType, List<ItemModel> items, ItemListModel? sourceModelList)
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                if (sourceModelList != null && (int)sourceModelList.Type != storageType)
+                    throw new InvalidOperationException(
+                        $"ItemList type drift detected for account token {accountId * 1000L + storageType}: payload type={(int)sourceModelList.Type}.");
+
+                short? inferredSize = sourceModelList?.Size > 0 ? sourceModelList.Size : null;
+                long? inferredBits = sourceModelList?.Bits;
+
+                var storage = await _context.OwnerItemStorageAccount
+                    .FirstOrDefaultAsync(x => x.AccountId == accountId && x.Type == storageType);
+                if (storage == null)
+                    throw new InvalidOperationException($"Invalid ItemListId {accountId * 1000L + storageType}: owner storage list does not exist for account {accountId}.");
+
+                if (inferredSize.HasValue)
+                    storage.Size = inferredSize.Value;
+                if (inferredBits.HasValue)
+                    storage.Bits = inferredBits.Value;
+                storage.UpdatedAt = DateTime.UtcNow;
+                _context.OwnerItemStorageAccount.Update(storage);
+
+                var slots = await _context.OwnerItemStorageAccountSlots
+                    .Where(x => x.AccountId == accountId && x.Type == storageType)
+                    .ToListAsync();
+                var slotsByPosition = slots.ToDictionary(x => (int)x.Slot);
+
+                var existingInstanceIds = slots
+                    .Where(x => x.ItemInstanceId.HasValue)
+                    .Select(x => x.ItemInstanceId!.Value)
+                    .Distinct()
+                    .ToList();
+
+                var instances = await _context.OwnerItemStorageInstances
+                    .Where(x => existingInstanceIds.Contains(x.Id))
+                    .ToDictionaryAsync(x => x.Id);
+                var accessoryStatusesToInsert = new List<OwnerItemStorageInstanceAccessoryStatusReadModel>();
+                var socketStatusesToInsert = new List<OwnerItemStorageInstanceSocketStatusReadModel>();
+                var payloadInstanceIds = new HashSet<Guid>();
+
+                foreach (var item in items)
+                {
+                    var slotIndex = item.Slot;
+                    if (slotIndex < 0)
+                        continue;
+
+                    if (!slotsByPosition.TryGetValue(slotIndex, out var slot))
+                    {
+                        slot = new OwnerItemStorageAccountSlotReadModel
+                        {
+                            AccountId = accountId,
+                            Type = storageType,
+                            Slot = (short)slotIndex,
+                            UpdatedAt = DateTime.UtcNow
+                        };
+                        _context.OwnerItemStorageAccountSlots.Add(slot);
+                        slotsByPosition[slotIndex] = slot;
+                    }
+
+                    slot.UpdatedAt = DateTime.UtcNow;
+
+                    var isEmpty = item.ItemId <= 0 || item.Amount <= 0;
+                    if (isEmpty)
+                    {
+                        slot.ItemInstanceId = null;
+                        continue;
+                    }
+
+                    var instanceId = item.Id == Guid.Empty ? Guid.NewGuid() : item.Id;
+                    payloadInstanceIds.Add(instanceId);
+                    slot.ItemInstanceId = instanceId;
+
+                    if (!instances.TryGetValue(instanceId, out var instance))
+                    {
+                        instance = new OwnerItemStorageInstanceReadModel { Id = instanceId };
+                        _context.OwnerItemStorageInstances.Add(instance);
+                        instances[instanceId] = instance;
+                    }
+
+                    instance.ItemId = item.ItemId;
+                    instance.Amount = item.Amount;
+                    instance.Power = item.Power;
+                    instance.RerollLeft = item.RerollLeft;
+                    instance.FamilyType = item.FamilyType;
+                    instance.Duration = item.Duration;
+                    instance.EndDate = item.EndDate;
+                    instance.FirstExpired = item.FirstExpired;
+                    instance.TamerShopSellPrice = item.TamerShopSellPrice;
+                    if (instance.CreatedAt == default)
+                        instance.CreatedAt = DateTime.UtcNow;
+
+                    await _context.OwnerItemStorageAccessoryStatuses
+                        .Where(x => x.ItemInstanceId == instanceId)
+                        .ExecuteDeleteAsync();
+
+                    await _context.OwnerItemStorageSocketStatuses
+                        .Where(x => x.ItemInstanceId == instanceId)
+                        .ExecuteDeleteAsync();
+
+                    foreach (var accessory in item.AccessoryStatus)
+                    {
+                        accessoryStatusesToInsert.Add(new OwnerItemStorageInstanceAccessoryStatusReadModel
+                        {
+                            Id = Guid.NewGuid(),
+                            ItemInstanceId = instanceId,
+                            Slot = (byte)accessory.Slot,
+                            Type = (short)accessory.Type,
+                            Value = accessory.Value
+                        });
+                    }
+
+                    foreach (var socket in item.SocketStatus)
+                    {
+                        socketStatusesToInsert.Add(new OwnerItemStorageInstanceSocketStatusReadModel
+                        {
+                            Id = Guid.NewGuid(),
+                            ItemInstanceId = instanceId,
+                            Slot = (byte)socket.Slot,
+                            Type = (short)socket.Type,
+                            AttributeId = socket.AttributeId,
+                            Value = socket.Value
+                        });
+                    }
+                }
+
+                var orphanedInstanceIds = existingInstanceIds
+                    .Except(payloadInstanceIds)
+                    .ToList();
+
+                if (orphanedInstanceIds.Count > 0)
+                {
+                    await _context.OwnerItemStorageAccessoryStatuses
+                        .Where(x => orphanedInstanceIds.Contains(x.ItemInstanceId))
+                        .ExecuteDeleteAsync();
+                    await _context.OwnerItemStorageSocketStatuses
+                        .Where(x => orphanedInstanceIds.Contains(x.ItemInstanceId))
+                        .ExecuteDeleteAsync();
+                    await _context.OwnerItemStorageInstances
+                        .Where(x => orphanedInstanceIds.Contains(x.Id))
+                        .ExecuteDeleteAsync();
+                }
+
+                if (accessoryStatusesToInsert.Count > 0)
+                {
+                    _context.OwnerItemStorageAccessoryStatuses.AddRange(
+                        accessoryStatusesToInsert.Where(x => payloadInstanceIds.Contains(x.ItemInstanceId)));
+                }
+                if (socketStatusesToInsert.Count > 0)
+                {
+                    _context.OwnerItemStorageSocketStatuses.AddRange(
+                        socketStatusesToInsert.Where(x => payloadInstanceIds.Contains(x.ItemInstanceId)));
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
             }
         }
 
         public async Task AddInventorySlotsAsync(List<ItemModel> items)
         {
-            var itemListDto = await _context.ItemLists
-                .AsNoTracking()
-                .Include(x => x.Items)
-                .ThenInclude(y => y.AccessoryStatus)
-                  .Include(x => x.Items)
-                .ThenInclude(y => y.SocketStatus)
-                .FirstOrDefaultAsync(x => x.Id == items.First().ItemListId);
+            if (!items.Any())
+                return;
 
-            if (itemListDto != null)
-            {
-                foreach (var item in items)
-                {
-                    _context.Add(_mapper.Map<ItemDTO>(item));
-                    itemListDto.Size += 1;
-                }
+            await UpsertOwnerItemsAsync(items);
 
-                _context.Update(itemListDto);
-            }
-
-            _context.SaveChanges();
+            var itemListId = items.First().ItemListId;
+            var newSize = (byte)(items.Max(x => x.Slot) + 1);
+            await UpsertOwnerListSizeAsync(itemListId, newSize);
         }
 
         public async Task UpdateCharacterEventStateByIdAsync(long characterId, CharacterEventStateEnum state)
@@ -1103,22 +1444,10 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Character
 
         public async Task AddInventorySlotAsync(ItemModel newSlot)
         {
-            var itemListDto = await _context.ItemLists
-                .AsNoTracking()
-                .Include(x => x.Items)
-                .FirstOrDefaultAsync(x => x.Id == newSlot.ItemListId);
+            await UpsertOwnerItemsAsync(new List<ItemModel> { newSlot });
 
-            if (itemListDto != null)
-            {
-                var dto = _mapper.Map<ItemDTO>(newSlot);
-                _context.Add(dto);
-
-                //itemListDto.Items.Add(dto);
-                itemListDto.Size += 1;
-                _context.Update(itemListDto);
-            }
-
-            _context.SaveChanges();
+            var newSize = (byte)(newSlot.Slot + 1);
+            await UpsertOwnerListSizeAsync(newSlot.ItemListId, newSize);
         }
 
         public async Task UpdateCharacterArenaPointsAsync(CharacterArenaPointsModel points)

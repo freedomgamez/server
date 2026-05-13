@@ -12,6 +12,7 @@ using DigitalWorldOnline.Commons.Packets.GameServer;
 using DigitalWorldOnline.Commons.Packets.MapServer;
 using DigitalWorldOnline.Commons.Utils;
 using DigitalWorldOnline.Game.Managers;
+using DigitalWorldOnline.Game.Services;
 using DigitalWorldOnline.GameHost;
 using MediatR;
 using Microsoft.Extensions.Configuration;
@@ -32,6 +33,7 @@ namespace DigitalWorldOnline.Game
         private readonly PvpServer _pvpServer;
         private readonly DungeonsServer _dungeonsServer;
         private readonly PartyManager _partyManager;
+        private readonly OwnerStorageFlushService _ownerStorageFlushService;
 
         private const int OnConnectEventHandshakeHandler = 65535;
 
@@ -44,7 +46,8 @@ namespace DigitalWorldOnline.Game
             MapServer mapServer,
             PvpServer pvpServer,
             DungeonsServer dungeonsServer,
-            PartyManager partyManager)
+            PartyManager partyManager,
+            OwnerStorageFlushService ownerStorageFlushService)
         {
             OnConnect += OnConnectEvent;
             OnDisconnect += OnDisconnectEvent;
@@ -60,6 +63,7 @@ namespace DigitalWorldOnline.Game
             _pvpServer = pvpServer;
             _dungeonsServer = dungeonsServer;
             _partyManager = partyManager;
+            _ownerStorageFlushService = ownerStorageFlushService;
         }
 
         /// <summary>
@@ -104,11 +108,14 @@ namespace DigitalWorldOnline.Game
         /// </summary>
         /// <param name="sender">The object itself</param>
         /// <param name="gameClientEvent">Game client who disconnected</param>
-        private void OnDisconnectEvent(object sender, GameClientEvent gameClientEvent)
+        private async void OnDisconnectEvent(object sender, GameClientEvent gameClientEvent)
         {
             _logger.Information($"Received disconnection event for {gameClientEvent.Client.HiddenAddress}.");
 
             _logger.Debug($"Source disconnected: {gameClientEvent.Client.ClientAddress}. Account: {gameClientEvent.Client.AccountId}.");
+
+            if (gameClientEvent.Client.Tamer != null)
+                await _ownerStorageFlushService.FlushForTransitionAsync(gameClientEvent.Client);
 
             if (gameClientEvent.Client.DungeonMap)
             {
@@ -123,7 +130,7 @@ namespace DigitalWorldOnline.Game
             {
                 gameClientEvent.Client.Tamer.UpdateState(CharacterStateEnum.Disconnected);
                 _logger.Information($"Updating character {gameClientEvent.Client.TamerId} state upon disconnect...");
-                _sender.Send(new UpdateCharacterStateCommand(gameClientEvent.Client.TamerId, CharacterStateEnum.Disconnected));
+                await _sender.Send(new UpdateCharacterStateCommand(gameClientEvent.Client.TamerId, CharacterStateEnum.Disconnected));
 
                 // Persist daily play-time progress so RemainingSeconds reflects what was
                 // actually accumulated this session. Without this, sub-threshold play
@@ -133,16 +140,16 @@ namespace DigitalWorldOnline.Game
                     && gameClientEvent.Client.Tamer.TimeReward.RewardIndex != Commons.Enums.TimeRewardIndexEnum.Ended)
                 {
                     gameClientEvent.Client.Tamer.TimeReward.Tick(DateTime.UtcNow); // final decrement
-                    _sender.Send(new UpdateTamerTimeRewardCommand(gameClientEvent.Client.Tamer.TimeReward));
+                    await _sender.Send(new UpdateTamerTimeRewardCommand(gameClientEvent.Client.Tamer.TimeReward));
                 }
 
                 CharacterFriendsNotification(gameClientEvent);
                 CharacterGuildNotification(gameClientEvent);
-                PartyNotification(gameClientEvent);
+                await PartyNotification(gameClientEvent);
                 CharacterTargetTraderNotification(gameClientEvent);
                 if (gameClientEvent.Client.DungeonMap)
                 {
-                    DungeonWarpGate(gameClientEvent);
+                    await DungeonWarpGate(gameClientEvent);
                 }
 
 
@@ -209,6 +216,7 @@ namespace DigitalWorldOnline.Game
                             }
                             if (dungeonClient.DungeonMap)
                             {
+                                await _ownerStorageFlushService.FlushForTransitionAsync(dungeonClient);
                                 _dungeonsServer.RemoveClient(dungeonClient);
 
                                 dungeonClient.Tamer.NewLocation(map, destination.X, destination.Y);

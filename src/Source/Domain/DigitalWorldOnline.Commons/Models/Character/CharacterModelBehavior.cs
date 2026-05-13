@@ -234,8 +234,9 @@ namespace DigitalWorldOnline.Commons.Models.Character
         /// Indicates that the tamer has a valid Aura equiped.
         /// </summary>
         public bool HasAura => Aura.ItemId > 0 &&
-            (Aura.ItemInfo?.UseTimeType == 0 ||
-            (Aura.ItemInfo?.UseTimeType > 0 && Aura.RemainingMinutes() > 0 || Aura.RemainingMinutes() != 0xFFFFFFFF));
+            Aura.ItemInfo != null &&
+            (Aura.ItemInfo.UseTimeType == 0 ||
+             (Aura.ItemInfo.UseTimeType > 0 && Aura.RemainingMinutes() != 0xFFFFFFFF));
 
         /// <summary>
         /// Gets the Aura equipment slot.
@@ -245,83 +246,93 @@ namespace DigitalWorldOnline.Commons.Models.Character
         /// <summary>
         /// Returns the tamer equipment items.
         /// </summary>
-        public ItemListModel Equipment => ItemList.First(x => x.Type == ItemListEnum.Equipment);
+        public ItemListModel Equipment => RequireItemList(ItemListEnum.Equipment);
 
         /// <summary>
         /// Returns the tamer skill list (client receives as Item).
         /// </summary>
-        public ItemListModel TamerSkill => ItemList.First(x => x.Type == ItemListEnum.TamerSkill);
+        public ItemListModel TamerSkill => RequireItemList(ItemListEnum.TamerSkill);
 
         /// <summary>
         /// Returns the tamer inventory items.
         /// </summary>
-        public ItemListModel Inventory => ItemList.First(x => x.Type == ItemListEnum.Inventory);
+        public ItemListModel Inventory => RequireItemList(ItemListEnum.Inventory);
 
 
         /// <summary>
         /// Returns the tamer warehouse items.
         /// </summary>
-        public ItemListModel Warehouse => ItemList.First(x => x.Type == ItemListEnum.Warehouse);
+        public ItemListModel Warehouse => RequireItemList(ItemListEnum.Warehouse);
 
         /// <summary>
         /// Returns the tamer digivice's chipsets.
         /// </summary>
-        public ItemListModel ChipSets => ItemList.First(x => x.Type == ItemListEnum.Chipsets);
+        public ItemListModel ChipSets => RequireItemList(ItemListEnum.Chipsets);
 
         /// <summary>
         /// Returns the tamer digivice's jogress chipset.
         /// </summary>
-        public ItemListModel JogressChipSet => ItemList.First(x => x.Type == ItemListEnum.JogressChipset);
+        public ItemListModel JogressChipSet => RequireItemList(ItemListEnum.JogressChipset);
 
         /// <summary>
         /// Returns the tamer digivice.
         /// </summary>
-        public ItemListModel Digivice => ItemList.First(x => x.Type == ItemListEnum.Digivice);
+        public ItemListModel Digivice => RequireItemList(ItemListEnum.Digivice);
 
         /// <summary>
         /// Returns the tamer reward warehouse items.
         /// </summary>
-        public ItemListModel RewardWarehouse => ItemList.First(x => x.Type == ItemListEnum.RewardWarehouse);
+        public ItemListModel RewardWarehouse => RequireItemList(ItemListEnum.RewardWarehouse);
 
         /// <summary>
         /// Returns the tamer gift warehouse items.
         /// </summary>
-        public ItemListModel GiftWarehouse => ItemList.First(x => x.Type == ItemListEnum.GiftWarehouse);
+        public ItemListModel GiftWarehouse => RequireItemList(ItemListEnum.GiftWarehouse);
 
         /// <summary>
         /// Returns the character consigned warehouse.
         /// </summary>
-        public ItemListModel ConsignedWarehouse => ItemList.First(x => x.Type == ItemListEnum.ConsignedWarehouse);
+        public ItemListModel ConsignedWarehouse => RequireItemList(ItemListEnum.ConsignedWarehouse);
 
         /// <summary>
         /// Returns the account warehouse items.
         /// </summary>
-        public ItemListModel AccountWarehouse => ItemList.FirstOrDefault(x => x.Type == ItemListEnum.AccountWarehouse);
+        public ItemListModel AccountWarehouse => RequireItemList(ItemListEnum.AccountWarehouse);
 
         /// <summary>
         /// Returns the account cash shop warehouse items.
         /// </summary>
-        public ItemListModel AccountShopWarehouse => ItemList.FirstOrDefault(x => x.Type == ItemListEnum.ShopWarehouse);
+        public ItemListModel AccountShopWarehouse => RequireItemList(ItemListEnum.ShopWarehouse);
 
         /// <summary>
         /// Returns the account cash shop items history.
         /// </summary>
-        public ItemListModel AccountBuyHistory => ItemList.FirstOrDefault(x => x.Type == ItemListEnum.BuyHistory);
+        public ItemListModel AccountBuyHistory => RequireItemList(ItemListEnum.BuyHistory);
 
         /// <summary>
         /// Returns the account cash warehouse items.
         /// </summary>
-        public ItemListModel AccountCashWarehouse => ItemList.FirstOrDefault(x => x.Type == ItemListEnum.CashWarehouse);
+        public ItemListModel AccountCashWarehouse => RequireItemList(ItemListEnum.CashWarehouse);
 
         /// <summary>
         /// Returns the tamer shop items.
         /// </summary>
-        public ItemListModel TamerShop => ItemList.First(x => x.Type == ItemListEnum.TamerShop);
+        public ItemListModel TamerShop => RequireItemList(ItemListEnum.TamerShop);
 
         /// <summary>
         /// Returns the consigned shop items.
         /// </summary>
-        public ItemListModel ConsignedShopItems => ItemList.First(x => x.Type == ItemListEnum.ConsignedShop);
+        public ItemListModel ConsignedShopItems => RequireItemList(ItemListEnum.ConsignedShop);
+
+        private ItemListModel RequireItemList(ItemListEnum type)
+        {
+            var itemList = ItemList.FirstOrDefault(x => x.Type == type);
+            if (itemList != null)
+                return itemList;
+
+            throw new InvalidOperationException(
+                $"Missing required item list type '{type}' for character {Id}. LoadedTypes=[{string.Join(",", ItemList.Select(x => x.Type))}]");
+        }
 
         /// <summary>
         /// Returns the tamer's current active digimon.
@@ -465,7 +476,7 @@ namespace DigitalWorldOnline.Commons.Models.Character
             EquipmentAttribute(_baseAt,
                 SkillCodeApplyAttributeEnum.AT,
                 SkillCodeApplyAttributeEnum.DA) +
-            SocketAttribute(_baseAt, AccessoryStatusTypeEnum.SCD) +
+            SocketAttribute(_baseAt, AccessoryStatusTypeEnum.AT) +
             BuffAttribute(_baseAt,
                 SkillCodeApplyAttributeEnum.AT,
                 SkillCodeApplyAttributeEnum.DA));
@@ -473,7 +484,7 @@ namespace DigitalWorldOnline.Commons.Models.Character
         public short DE => (short)
             (_baseDe +
             EquipmentAttribute(_baseDe, SkillCodeApplyAttributeEnum.DP) +
-            SocketAttribute(_baseDe, AccessoryStatusTypeEnum.CT) +
+            SocketAttribute(_baseDe, AccessoryStatusTypeEnum.DE) +
             BuffAttribute(_baseDe, SkillCodeApplyAttributeEnum.DP));
 
         public short BonusEXP => (short)
@@ -872,6 +883,19 @@ namespace DigitalWorldOnline.Commons.Models.Character
         /// <param name="attributes">Target attribute params.</param>
         public int EquipmentAttribute(int baseValue, params SkillCodeApplyAttributeEnum[] attributes)
         {
+            return EquipmentAttributeInternal(baseValue, false, attributes);
+        }
+
+        public int EquipmentAttributeForPartner(int baseValue, params SkillCodeApplyAttributeEnum[] attributes)
+        {
+            return EquipmentAttributeInternal(baseValue, true, attributes);
+        }
+
+        private int EquipmentAttributeInternal(
+            int baseValue,
+            bool requirePartnerEligibility,
+            params SkillCodeApplyAttributeEnum[] attributes)
+        {
             var totalValue = 0;
 
             foreach (var item in Equipment.EquippedItems)
@@ -879,6 +903,12 @@ namespace DigitalWorldOnline.Commons.Models.Character
 
                 if (item.ItemInfo == null || item.ItemInfo.SkillInfo == null || item.RemainingMinutes() == 0xFFFFFFFF)
                     continue;
+
+                if (requirePartnerEligibility)
+                {
+                    if (Partner == null || Level < item.ItemInfo.TamerMinLevel || Partner.Level < item.ItemInfo.DigimonMinLevel)
+                        continue;
+                }
 
                 foreach (var apply in item.ItemInfo.SkillInfo.Apply)
                 {
@@ -920,16 +950,13 @@ namespace DigitalWorldOnline.Commons.Models.Character
                 if (item.RemainingMinutes() == 0xFFFFFFFF)
                     continue;
 
-                var accessoriesWithValueGreaterThanZero = item.SocketStatus.FirstOrDefault(accessory => accessory.Value > 0);
-
-                if (accessoriesWithValueGreaterThanZero != null)
+                foreach (var socket in item.SocketStatus.Where(accessory => accessory.Value > 0))
                 {
-                    if (attribute == accessoriesWithValueGreaterThanZero.Type)
+                    if (attribute == socket.Type)
                     {
-                        totalValue += (int)Math.Round(((double)accessoriesWithValueGreaterThanZero.Value / 100) * item.ItemInfo.ApplyElement);
+                        totalValue += (int)Math.Round(((double)socket.Value / 100) * item.ItemInfo.ApplyElement);
                     }
                 }
-
             }
 
             return totalValue;
@@ -940,11 +967,11 @@ namespace DigitalWorldOnline.Commons.Models.Character
         /// <param name="type">Target status type.</param>
         public short ChipsetStatus(AccessoryStatusTypeEnum type, int baseValue = 0)
         {
-            short totalValue = 0;
+            var totalValue = 0;
 
             foreach (var item in ChipSets.EquippedItems)
             {
-                if (!item.HasAccessoryStatus && Level >= item.ItemInfo.TamerMinLevel && Partner.Level >= item.ItemInfo.DigimonMinLevel)
+                if (!item.HasAccessoryStatus || Level < item.ItemInfo.TamerMinLevel || Partner.Level < item.ItemInfo.DigimonMinLevel)
                     continue;
 
                 if (!IsSameFamily(item))
@@ -953,19 +980,19 @@ namespace DigitalWorldOnline.Commons.Models.Character
                 foreach (var statusValue in item.AccessoryStatus.Where(x => x.Type == type).Select(x => x.Value))
                 {
 
-                    if (type == AccessoryStatusTypeEnum.AS || type >= AccessoryStatusTypeEnum.Data)
+                    if (type >= AccessoryStatusTypeEnum.Data)
                     {
                         var percentValue = (decimal)statusValue / 100;
 
-                        totalValue += (short)((percentValue * baseValue) / 100);
+                        totalValue += (int)((percentValue * baseValue) / 100);
                     }
-                    else if (type == AccessoryStatusTypeEnum.CT || type == AccessoryStatusTypeEnum.EV || type == AccessoryStatusTypeEnum.ATT)
+                    else if (type == AccessoryStatusTypeEnum.CT || type == AccessoryStatusTypeEnum.EV)
                     {
-                        totalValue += (short)(statusValue * 100);
+                        totalValue += statusValue * 100;
                     }
                     else if (type == AccessoryStatusTypeEnum.CD)
                     {
-                        totalValue = (short)(statusValue / 100);
+                        totalValue += statusValue;
                     }
                     else
                     {
@@ -974,7 +1001,9 @@ namespace DigitalWorldOnline.Commons.Models.Character
                 }
             }
 
-            return totalValue;
+            return totalValue > short.MaxValue ? short.MaxValue :
+                totalValue < short.MinValue ? short.MinValue :
+                (short)totalValue;
         }
         public bool IsSameFamily(ItemModel item)
         {
@@ -988,18 +1017,19 @@ namespace DigitalWorldOnline.Commons.Models.Character
 
         public short DigiviceAccessoryStatus(AccessoryStatusTypeEnum type, int baseValue = 0)
         {
-            short totalValue = 0;
+            var totalValue = 0;
 
             foreach (var item in Digivice.EquippedItems)
             {
-                if (!item.HasAccessoryStatus && Level >= item.ItemInfo.TamerMinLevel && Partner.Level >= item.ItemInfo.DigimonMinLevel)
+                if (!item.HasAccessoryStatus || Level < item.ItemInfo.TamerMinLevel || Partner.Level < item.ItemInfo.DigimonMinLevel)
                     continue;
 
                 foreach (var statusValue in item.AccessoryStatus.Where(x => x.Type == type).Select(x => x.Value))
                 {
                     var percent = (decimal)item.Power / 100;
+                    var scaledValue = (int)Math.Round((double)(statusValue * percent), MidpointRounding.AwayFromZero);
 
-                    if (type == AccessoryStatusTypeEnum.AS || type >= AccessoryStatusTypeEnum.Data)
+                    if (type >= AccessoryStatusTypeEnum.Data)
                     {
                         if (type >= AccessoryStatusTypeEnum.Data)
                         {
@@ -1011,22 +1041,24 @@ namespace DigitalWorldOnline.Commons.Models.Character
 
                         totalValue += statusValue;
                     }
-                    else if (type == AccessoryStatusTypeEnum.CT || type == AccessoryStatusTypeEnum.EV || type == AccessoryStatusTypeEnum.ATT)
+                    else if (type == AccessoryStatusTypeEnum.CT || type == AccessoryStatusTypeEnum.EV)
                     {
-                        totalValue += (short)(statusValue * percent * 100);
+                        totalValue += scaledValue * 100;
                     }
                     else if (type == AccessoryStatusTypeEnum.CD)
                     {
-                        totalValue = (short)(statusValue / 100);
+                        totalValue += scaledValue;
                     }
                     else
                     {
-                        totalValue += (short)(percent * statusValue);
+                        totalValue += scaledValue;
                     }
                 }
             }
 
-            return totalValue;
+            return totalValue > short.MaxValue ? short.MaxValue :
+                totalValue < short.MinValue ? short.MinValue :
+                (short)totalValue;
         }
 
         /// <summary>
@@ -1035,45 +1067,51 @@ namespace DigitalWorldOnline.Commons.Models.Character
         /// <param name="type">Target status type.</param>
         public short AccessoryStatus(AccessoryStatusTypeEnum type, int baseValue = 0)
         {
-            short totalValue = 0;
+            var totalValue = 0;
 
             foreach (var item in Equipment.EquippedItems)
             {
-                if (!item.HasAccessoryStatus && Level >= item.ItemInfo.TamerMinLevel && Partner.Level >= item.ItemInfo.DigimonMinLevel)
+                if (!item.HasAccessoryStatus || Level < item.ItemInfo.TamerMinLevel || Partner.Level < item.ItemInfo.DigimonMinLevel)
                     continue;
 
                 foreach (var statusValue in item.AccessoryStatus.Where(x => x.Type == type).Select(x => x.Value))
                 {
                     var percent = (decimal)item.Power / 100;
+                    var scaledValue = (int)Math.Round((double)(statusValue * percent), MidpointRounding.AwayFromZero);
 
-                    if (type == AccessoryStatusTypeEnum.AS || type >= AccessoryStatusTypeEnum.Data)
+                    if (type >= AccessoryStatusTypeEnum.Data)
                     {
                         if (type >= AccessoryStatusTypeEnum.Data)
                         {
-                            if (!HasAcessoryAttribute(Partner.BaseInfo.Attribute, type) || !HasAcessoryElement(Partner.BaseInfo.Element, type))
+                            var isPossible =
+                                HasAcessoryAttribute(Partner.BaseInfo.Attribute, type) ||
+                                HasAcessoryElement(Partner.BaseInfo.Element, type);
+                            if (!isPossible)
                                 break;
                         }
 
                         var percentValue = (decimal)statusValue / 100;
 
-                        totalValue += (short)((percent * percentValue * baseValue) / 100);
+                        totalValue += (int)((percent * percentValue * baseValue) / 100);
                     }
-                    else if (type == AccessoryStatusTypeEnum.CT || type == AccessoryStatusTypeEnum.EV || type == AccessoryStatusTypeEnum.ATT)
+                    else if (type == AccessoryStatusTypeEnum.CT || type == AccessoryStatusTypeEnum.EV)
                     {
-                        totalValue += (short)(statusValue * percent * 100);
+                        totalValue += scaledValue * 100;
                     }
                     else if (type == AccessoryStatusTypeEnum.CD)
                     {
-                        totalValue = (short)(statusValue / 100);
+                        totalValue += scaledValue;
                     }
                     else
                     {
-                        totalValue += (short)(percent * statusValue);
+                        totalValue += scaledValue;
                     }
                 }
             }
 
-            return totalValue;
+            return totalValue > short.MaxValue ? short.MaxValue :
+                totalValue < short.MinValue ? short.MinValue :
+                (short)totalValue;
         }
 
         public static bool HasAcessoryAttribute(DigimonAttributeEnum hitter, AccessoryStatusTypeEnum accessory)
@@ -1759,6 +1797,18 @@ namespace DigitalWorldOnline.Commons.Models.Character
 
             if (XGauge > Xai.XGauge)
                 XGauge = Xai.XGauge;
+        }
+
+        public void ClampXaiResourcesToCap()
+        {
+            if (Xai is null)
+                return;
+
+            if (XGauge > Xai.XGauge)
+                XGauge = Xai.XGauge;
+
+            if (XCrystals > Xai.XCrystals)
+                XCrystals = Xai.XCrystals;
         }
 
         /// <summary>

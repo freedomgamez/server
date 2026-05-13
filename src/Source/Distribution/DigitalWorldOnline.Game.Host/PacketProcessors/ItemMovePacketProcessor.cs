@@ -54,6 +54,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var itemListMovimentation = UtilitiesFunctions.SwitchItemList(originSlot, destinationSlot);
 
             var success = SwapItems(client, originSlot, destinationSlot, itemListMovimentation);
+            if (!success)
+            {
+                _logger.Warning(
+                    "ItemMove failed for tamer {TamerId}: origin={OriginSlot} destination={DestinationSlot} movement={Movement}",
+                    client.TamerId, originSlot, destinationSlot, itemListMovimentation);
+            }
 
             if (success)
             {
@@ -95,6 +101,15 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             client.Tamer.ChipSets.CheckEmptyItems();
                             await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
                             await _sender.Send(new UpdateItemsCommand(client.Tamer.ChipSets));
+                        }
+                        break;
+                    case ItemListMovimentationEnum.InventoryToJogressChipset:
+                    case ItemListMovimentationEnum.JogressChipsetToInventory:
+                        {
+                            client.Tamer.Inventory.CheckEmptyItems();
+                            client.Tamer.JogressChipSet.CheckEmptyItems();
+                            await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
+                            await _sender.Send(new UpdateItemsCommand(client.Tamer.JogressChipSet));
                         }
                         break;
 
@@ -144,27 +159,38 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 }
 
                 client.Send(
-                    UtilitiesFunctions.GroupPackets(
-                        new ItemMoveSuccessPacket(originSlot, destinationSlot).Serialize(),
-                        new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
-                    )
+                    UtilitiesFunctions.GroupPackets(BuildMoveResultPackets(client, itemListMovimentation, true, originSlot, destinationSlot))
                 );
 
                 if (originSlot == GeneralSizeEnum.XaiSlot.GetHashCode())
                 {
                     client.Tamer.Xai.RemoveXai();
                     client.Send(new XaiInfoPacket());
-                    client.Send(new TamerXaiResourcesPacket(0, (short)client.Tamer.XGauge));
+                    client.Send(new TamerXaiResourcesPacket(0, 0));
                     await _sender.Send(new UpdateCharacterXaiCommand(client.Tamer.Xai));
                 }
 
                 if (destinationSlot == GeneralSizeEnum.XaiSlot.GetHashCode())
                 {
-                    var ItemId = client.Tamer.Equipment.FindItemBySlot(destinationSlot - 1000).ItemId;
+                    var equippedItem = client.Tamer.Equipment.FindItemBySlot(destinationSlot - 1000);
+                    if (equippedItem == null || equippedItem.ItemId <= 0)
+                    {
+                        _logger.Warning("Character {TamerId} failed XAI equip: empty slot item.", client.TamerId);
+                        return;
+                    }
 
-                    var XaiInfo = _mapper.Map<XaiAssetModel>(await _sender.Send(new XaiInformationQuery(ItemId)));
+                    var itemId = equippedItem.ItemId;
+                    var xaiDto = await _sender.Send(new XaiInformationQuery(itemId));
+                    if (xaiDto == null)
+                    {
+                        _logger.Warning("Character {TamerId} failed XAI equip: item {ItemId} has no XAI asset row.", client.TamerId, itemId);
+                        return;
+                    }
+
+                    var XaiInfo = _mapper.Map<XaiAssetModel>(xaiDto);
 
                     client.Tamer.Xai.EquipXai(XaiInfo.ItemId, XaiInfo.XGauge, XaiInfo.XCrystals);
+                    client.Tamer.ClampXaiResourcesToCap();
 
                     client.Send(new XaiInfoPacket(client.Tamer.Xai));
                     client.Send(new TamerXaiResourcesPacket(client.Tamer.XGauge, client.Tamer.XCrystals));
@@ -172,19 +198,111 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     await _sender.Send(new UpdateCharacterXaiCommand(client.Tamer.Xai));
                 }
 
+                if (IsDigimonStatAffectingMove(itemListMovimentation))
+                {
+                    LogDigimonStatSnapshot(client, originSlot, destinationSlot, itemListMovimentation);
+                    AccessoryParitySnapshot.LogEquippedSnapshot(
+                        _logger,
+                        $"equip-move:{itemListMovimentation}",
+                        client.TamerId,
+                        client.Tamer.Equipment.EquippedItems);
+                }
+
                 _logger.Verbose($"Character {client.TamerId} moved an item from {originSlot} to {destinationSlot}.");
             }
             else
             {
                 client.Send(
-                    UtilitiesFunctions.GroupPackets(
-                        new ItemMoveFailPacket(originSlot, destinationSlot).Serialize(),
-                        new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
-                    )
+                    UtilitiesFunctions.GroupPackets(BuildMoveResultPackets(client, itemListMovimentation, false, originSlot, destinationSlot))
                 );
 
                 _logger.Warning($"Character {client.TamerId} failled to move item from {originSlot} to {destinationSlot}.");
             }
+        }
+
+        private static bool IsDigimonStatAffectingMove(ItemListMovimentationEnum movimentation)
+        {
+            return movimentation is ItemListMovimentationEnum.EquipmentToInventory
+                or ItemListMovimentationEnum.InventoryToEquipment
+                or ItemListMovimentationEnum.InventoryToDigivice
+                or ItemListMovimentationEnum.DigiviceToInventory
+                or ItemListMovimentationEnum.InventoryToChipset
+                or ItemListMovimentationEnum.ChipsetToInventory
+                or ItemListMovimentationEnum.InventoryToJogressChipset
+                or ItemListMovimentationEnum.JogressChipsetToInventory;
+        }
+
+        private void LogDigimonStatSnapshot(
+            GameClient client,
+            short originSlot,
+            short destinationSlot,
+            ItemListMovimentationEnum movimentation)
+        {
+            var partner = client.Partner;
+            if (partner == null)
+            {
+                _logger.Warning(
+                    "ItemMove stat snapshot skipped: tamer={TamerId} movement={Movement} origin={OriginSlot} destination={DestinationSlot} reason=NoPartner",
+                    client.TamerId, movimentation, originSlot, destinationSlot);
+                return;
+            }
+
+            _logger.Information(
+                "ItemMove stat snapshot: tamer={TamerId} partnerId={PartnerId} partnerName={PartnerName} movement={Movement} origin={OriginSlot} destination={DestinationSlot} HP={HP} DS={DS} AT={AT} DE={DE} AS={AS} HT={HT} BL={BL} CT={CT} EV={EV} CD={CD} ATT={ATT} SCD={SCD}",
+                client.TamerId,
+                partner.Id,
+                partner.Name,
+                movimentation,
+                originSlot,
+                destinationSlot,
+                partner.HP,
+                partner.DS,
+                partner.AT,
+                partner.DE,
+                partner.AS,
+                partner.HT,
+                partner.BL,
+                partner.CC,
+                partner.EV,
+                partner.CD,
+                partner.ATT,
+                partner.SCD);
+        }
+
+        private static byte[][] BuildMoveResultPackets(
+            GameClient client,
+            ItemListMovimentationEnum movimentation,
+            bool success,
+            short originSlot,
+            short destinationSlot)
+        {
+            var packets = new List<byte[]>
+            {
+                success
+                    ? new ItemMoveSuccessPacket(originSlot, destinationSlot).Serialize()
+                    : new ItemMoveFailPacket(originSlot, destinationSlot).Serialize(),
+                new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
+            };
+
+            if (movimentation is ItemListMovimentationEnum.InventoryToWarehouse or
+                ItemListMovimentationEnum.WarehouseToWarehouse or
+                ItemListMovimentationEnum.WarehouseToInventory or
+                ItemListMovimentationEnum.WarehouseToAccountWarehouse or
+                ItemListMovimentationEnum.AccountWarehouseToWarehouse)
+            {
+                packets.Add(new LoadInventoryPacket(client.Tamer.Warehouse, InventoryTypeEnum.Warehouse).Serialize());
+            }
+
+            if (movimentation is ItemListMovimentationEnum.InventoryToAccountWarehouse or
+                ItemListMovimentationEnum.WarehouseToAccountWarehouse or
+                ItemListMovimentationEnum.AccountWarehouseToAccountWarehouse or
+                ItemListMovimentationEnum.AccountWarehouseToInventory or
+                ItemListMovimentationEnum.AccountWarehouseToWarehouse)
+            {
+                packets.Add(new LoadInventoryPacket(client.Tamer.AccountWarehouse, InventoryTypeEnum.AccountWarehouse).Serialize());
+            }
+
+            return packets.ToArray();
         }
 
         private bool SwapItems(GameClient client, short originSlot, short destinationSlot, ItemListMovimentationEnum itemListMovimentation)
@@ -198,64 +316,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.DigiviceSlot.GetHashCode();
+                        if (!client.Tamer.Inventory.TryMoveAcrossLists(client.Tamer.Digivice, srcSlot, dstSlot))
+                            return false;
 
-                        var sourceItem = client.Tamer.Inventory.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Digivice.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            client.Tamer.Digivice.AddItemWithSlot(sourceItem, dstSlot);
-                            client.Tamer.Inventory.AddItemWithSlot(tempItem, srcSlot);
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)13, destItem, 1).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)13, destItem, 1).Serialize());
-                            }
-                        }
-                        else
-                        {
-                            client.Tamer.Digivice.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, 13, destItem, 1).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, 13, destItem, 1).Serialize());
-
-                            }
-                        }
-
-                        client.Send(new UpdateStatusPacket(client.Tamer));
-
-                        if (client.DungeonMap)
-                        {
-                            _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                                new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
-                        else
-                        {
-                            _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                              new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
-
+                        var equippedItem = client.Tamer.Digivice.FindItemBySlot(dstSlot) ?? new ItemModel();
+                        BroadcastAppearanceUpdate(client, 13, equippedItem, 1);
+                        SendStatusAndSpeed(client);
                         return true;
                     }
 
@@ -263,67 +329,10 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.ChipsetMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
+                        if (!client.Tamer.ChipSets.TryMoveAcrossLists(client.Tamer.Inventory, srcSlot, dstSlot))
+                            return false;
 
-                        var sourceItem = client.Tamer.ChipSets.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Inventory.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-
-                            client.Tamer.ChipSets.AddItemWithSlot(tempItem, srcSlot);
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)srcSlot, destItem, 1).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)srcSlot, destItem, 1).Serialize());
-
-                            }
-                        }
-                        else
-                        {
-                            client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)srcSlot, new ItemModel(), 0).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)srcSlot, new ItemModel(), 0).Serialize());
-
-                            }
-                        }
-
-                        client.Send(new UpdateStatusPacket(client.Tamer));
-
-                        if (client.DungeonMap)
-                        {
-                            _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                            new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
-                        else
-                        {
-                            _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                            new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-
-                        }
-
+                        SendStatusAndSpeed(client);
                         return true;
                     }
 
@@ -331,66 +340,31 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.ChipsetMinSlot.GetHashCode();
+                        if (!client.Tamer.Inventory.TryMoveAcrossLists(client.Tamer.ChipSets, srcSlot, dstSlot))
+                            return false;
 
-                        var sourceItem = client.Tamer.Inventory.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.ChipSets.FindItemBySlot(dstSlot);
+                        SendStatusAndSpeed(client);
+                        return true;
+                    }
+                case ItemListMovimentationEnum.InventoryToJogressChipset:
+                    {
+                        var srcSlot = originSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
+                        const int dstSlot = 0;
+                        if (!client.Tamer.Inventory.TryMoveAcrossLists(client.Tamer.JogressChipSet, srcSlot, dstSlot))
+                            return false;
 
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
+                        SendStatusAndSpeed(client);
+                        return true;
+                    }
 
-                            client.Tamer.ChipSets.AddItemWithSlot(sourceItem, dstSlot);
+                case ItemListMovimentationEnum.JogressChipsetToInventory:
+                    {
+                        const int srcSlot = 0;
+                        var dstSlot = destinationSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
+                        if (!client.Tamer.JogressChipSet.TryMoveAcrossLists(client.Tamer.Inventory, srcSlot, dstSlot))
+                            return false;
 
-                            client.Tamer.Inventory.AddItemWithSlot(tempItem, srcSlot);
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)dstSlot, destItem, 1).Serialize());
-
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)dstSlot, destItem, 1).Serialize());
-
-                            }
-                        }
-                        else
-                        {
-                            client.Tamer.ChipSets.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)dstSlot, destItem, 0).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)dstSlot, destItem, 0).Serialize());
-
-                            }
-                        }
-
-                        client.Send(new UpdateStatusPacket(client.Tamer));
-
-                        if (client.DungeonMap)
-                        {
-                            _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                            new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
-                        else
-                        {
-                            _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                       new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
+                        SendStatusAndSpeed(client);
                         return true;
                     }
 
@@ -398,76 +372,29 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
                         var dstSlot = destinationSlot == GeneralSizeEnum.XaiSlot.GetHashCode() ? 11 : destinationSlot - GeneralSizeEnum.EquipmentMinSlot.GetHashCode();
-
-                        var sourceItem = client.Tamer.Inventory.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Equipment.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
+                        var srcItemBefore = client.Tamer.Inventory.FindItemBySlot(srcSlot);
+                        var dstItemBefore = client.Tamer.Equipment.FindItemBySlot(dstSlot);
+                        if (!client.Tamer.Inventory.TryMoveAcrossLists(client.Tamer.Equipment, srcSlot, dstSlot))
                         {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            client.Tamer.Equipment.AddItemWithSlot(sourceItem, dstSlot);
-
-                            client.Tamer.Inventory.AddItemWithSlot(tempItem, srcSlot);
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
+                            _logger.Warning(
+                                "InventoryToEquipment rejected: tamer={TamerId} srcSlot={SrcSlot} dstSlot={DstSlot} invSize={InvSize} equipSize={EquipSize} srcExists={SrcExists} srcItemId={SrcItemId} srcAmount={SrcAmount} dstExists={DstExists} dstItemId={DstItemId} dstAmount={DstAmount}",
                                 client.TamerId,
-                                new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)dstSlot, destItem, 1).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                client.TamerId,
-                                new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)dstSlot, destItem, 1).Serialize());
-
-                            }
-                        }
-                        else
-                        {
-                            client.Tamer.Equipment.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)dstSlot, destItem, 1).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                      client.TamerId,
-                                       new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)dstSlot, destItem, 1).Serialize());
-                            }
+                                srcSlot,
+                                dstSlot,
+                                client.Tamer.Inventory.Size,
+                                client.Tamer.Equipment.Size,
+                                srcItemBefore != null,
+                                srcItemBefore?.ItemId ?? 0,
+                                srcItemBefore?.Amount ?? 0,
+                                dstItemBefore != null,
+                                dstItemBefore?.ItemId ?? 0,
+                                dstItemBefore?.Amount ?? 0);
+                            return false;
                         }
 
-                        client.Send(new UpdateStatusPacket(client.Tamer));
-
-                        if (client.DungeonMap)
-                        {
-                            _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                                new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
-                        else
-                        {
-                            _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                                new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-
-                        }
-
-                        //if (client.Tamer.HasXai)
-                        //{
-                        //    var xai = await _sender.Send(new XaiInformationQuery(client.Tamer.Xai?.ItemId ?? 0));
-                        //    client.Tamer.SetXai(_mapper.Map<CharacterXaiModel>(xai));
-                        //
-                        //    client.Send(new XaiInfoPacket(client.Tamer.Xai));
-                        //
-                        //    client.Send(new TamerXaiResourcesPacket(client.Tamer.XGauge, client.Tamer.XCrystals));
-                        //}
-
+                        var equippedItem = client.Tamer.Equipment.FindItemBySlot(dstSlot) ?? new ItemModel();
+                        BroadcastAppearanceUpdate(client, (byte)dstSlot, equippedItem, 1);
+                        SendStatusAndSpeed(client);
                         return true;
                     }
 
@@ -475,140 +402,52 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
-
-                        var sourceItem = client.Tamer.Inventory.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Warehouse.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            if (destItem.ItemId == sourceItem.ItemId)
-                            {
-                                destItem.IncreaseAmount(sourceItem.Amount);
-                                sourceItem.ReduceAmount(sourceItem.Amount);
-                            }
-                            else
-                            {
-
-                                client.Tamer.Warehouse.AddItemWithSlot(sourceItem, dstSlot);
-
-                                client.Tamer.Inventory.AddItemWithSlot(tempItem, srcSlot);
-                            }
-
-                        }
-                        else
-                        {
-                            client.Tamer.Warehouse.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-                        }
-
-                        return true;
+                        return client.Tamer.Inventory.TryMoveAcrossLists(client.Tamer.Warehouse, srcSlot, dstSlot);
                     }
 
                 case ItemListMovimentationEnum.InventoryToAccountWarehouse:
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
-
                         var sourceItem = client.Tamer.Inventory.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.AccountWarehouse.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
+                        var destinationItem = client.Tamer.AccountWarehouse.FindItemBySlot(dstSlot);
+                        var moved = client.Tamer.Inventory.TryMoveAcrossLists(client.Tamer.AccountWarehouse, srcSlot, dstSlot);
+                        if (!moved)
                         {
-
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            if (destItem.ItemId == sourceItem.ItemId)
-                            {
-                                destItem.IncreaseAmount(sourceItem.Amount);
-                                sourceItem.ReduceAmount(sourceItem.Amount);
-                            }
-                            else
-                            {
-
-                                client.Tamer.AccountWarehouse.AddItemWithSlot(sourceItem, dstSlot);
-
-                                client.Tamer.Inventory.AddItemWithSlot(tempItem, srcSlot);
-                            }
-
-                        }
-                        else
-                        {
-                            client.Tamer.AccountWarehouse.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
+                            _logger.Warning(
+                                "InventoryToAccountWarehouse rejected: tamer={TamerId} srcSlot={SrcSlot} dstSlot={DstSlot} invSize={InvSize} accSize={AccSize} srcExists={SrcExists} srcItemId={SrcItemId} srcAmount={SrcAmount} dstExists={DstExists} dstItemId={DstItemId} dstAmount={DstAmount}",
+                                client.TamerId,
+                                srcSlot,
+                                dstSlot,
+                                client.Tamer.Inventory.Size,
+                                client.Tamer.AccountWarehouse.Size,
+                                sourceItem != null,
+                                sourceItem?.ItemId ?? 0,
+                                sourceItem?.Amount ?? 0,
+                                destinationItem != null,
+                                destinationItem?.ItemId ?? 0,
+                                destinationItem?.Amount ?? 0);
                         }
 
-                        return true;
+                        return moved;
                     }
 
                 case ItemListMovimentationEnum.EquipmentToInventory:
                     {
                         var srcSlot = originSlot == GeneralSizeEnum.XaiSlot.GetHashCode() ? 11 : originSlot - GeneralSizeEnum.EquipmentMinSlot.GetHashCode();
                         var dstSlot = destinationSlot;
+                        var destinationItem = client.Tamer.Inventory.FindItemBySlot(dstSlot);
+                        var hadDestinationItem = destinationItem?.ItemId > 0;
+                        if (!client.Tamer.Equipment.TryMoveAcrossLists(client.Tamer.Inventory, srcSlot, dstSlot))
+                            return false;
 
-                        var sourceItem = client.Tamer.Equipment.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Inventory.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-
-                            client.Tamer.Equipment.AddItemWithSlot(tempItem, srcSlot);
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)srcSlot, destItem, 1).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)srcSlot, destItem, 1).Serialize());
-                            }
-                        }
-                        else
-                        {
-                            client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)srcSlot, new ItemModel(), 0).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                    client.TamerId,
-                                    new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, (byte)srcSlot, new ItemModel(), 0).Serialize());
-
-                            }
-                        }
-
-                        client.Send(new UpdateStatusPacket(client.Tamer));
-
-                        if (client.DungeonMap)
-                        {
-                            _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                                new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
-                        else
-                        {
-                            _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                               new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
-
-                        
-
+                        var equippedItem = client.Tamer.Equipment.FindItemBySlot(srcSlot) ?? new ItemModel();
+                        BroadcastAppearanceUpdate(
+                            client,
+                            (byte)srcSlot,
+                            equippedItem.ItemId > 0 ? equippedItem : new ItemModel(),
+                            hadDestinationItem ? (byte)1 : (byte)0);
+                        SendStatusAndSpeed(client);
                         return true;
                     }
 
@@ -616,65 +455,16 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var srcSlot = 0;
                         var dstSlot = destinationSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
+                        if (!client.Tamer.Digivice.TryMoveAcrossLists(client.Tamer.Inventory, srcSlot, dstSlot))
+                            return false;
 
-                        var sourceItem = client.Tamer.Digivice.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Inventory.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-
-                            client.Tamer.Digivice.AddItemWithSlot(tempItem, srcSlot);
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                client.TamerId,
-                                new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, 13, destItem, 0).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                               client.TamerId,
-                               new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, 13, destItem, 0).Serialize());
-                            }
-                        }
-                        else
-                        {
-                            client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-
-                            if (client.DungeonMap)
-                            {
-                                _dungeonServer.BroadcastForTamerViewsAndSelf(
-                                client.TamerId,
-                                new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, 13, sourceItem, 0).Serialize());
-                            }
-                            else
-                            {
-                                _mapServer.BroadcastForTamerViewsAndSelf(
-                                client.TamerId,
-                                new UpdateTamerAppearancePacket(client.Tamer.AppearenceHandler, 13, sourceItem, 0).Serialize());
-
-                            }
-                        }
-
-                        client.Send(new UpdateStatusPacket(client.Tamer));
-
-                        if (client.DungeonMap)
-                        {
-                            _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                                new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
-                        else
-                        {
-                            _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId,
-                               new UpdateMovementSpeedPacket(client.Tamer).Serialize());
-                        }
-
+                        var digiviceItem = client.Tamer.Digivice.FindItemBySlot(srcSlot) ?? new ItemModel();
+                        BroadcastAppearanceUpdate(
+                            client,
+                            13,
+                            digiviceItem.ItemId > 0 ? digiviceItem : new ItemModel(),
+                            0);
+                        SendStatusAndSpeed(client);
                         return true;
                     }
 
@@ -698,144 +488,65 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
-
-                        var sourceItem = client.Tamer.Warehouse.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Inventory.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            if (destItem.ItemId == sourceItem.ItemId)
-                            {
-                                destItem.IncreaseAmount(sourceItem.Amount);
-                                sourceItem.ReduceAmount(sourceItem.Amount);
-                            }
-                            else
-                            {
-
-                                client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-                                client.Tamer.Warehouse.AddItemWithSlot(tempItem, srcSlot);
-                            }
-
-                        }
-                        else
-                        {
-                            client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-                        }
-
-                        return true;
+                        return client.Tamer.Warehouse.TryMoveAcrossLists(client.Tamer.Inventory, srcSlot, dstSlot);
                     }
 
                 case ItemListMovimentationEnum.WarehouseToAccountWarehouse:
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
-
-                        var sourceItem = client.Tamer.Warehouse.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.AccountWarehouse.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            if (destItem.ItemId == sourceItem.ItemId)
-                            {
-                                destItem.IncreaseAmount(sourceItem.Amount);
-                                sourceItem.ReduceAmount(sourceItem.Amount);
-                            }
-                            else
-                            {
-
-                                client.Tamer.AccountWarehouse.AddItemWithSlot(sourceItem, dstSlot);
-                                client.Tamer.Warehouse.AddItemWithSlot(tempItem, srcSlot);
-                            }
-
-                        }
-                        else
-                        {
-                            client.Tamer.AccountWarehouse.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-                        }
-
-                        return true;
+                        return client.Tamer.Warehouse.TryMoveAcrossLists(client.Tamer.AccountWarehouse, srcSlot, dstSlot);
                     }
 
                 case ItemListMovimentationEnum.AccountWarehouseToInventory:
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.InventoryMinSlot.GetHashCode();
-
-                        var sourceItem = client.Tamer.AccountWarehouse.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Inventory.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            if (destItem.ItemId == sourceItem.ItemId)
-                            {
-                                destItem.IncreaseAmount(sourceItem.Amount);
-                                sourceItem.ReduceAmount(sourceItem.Amount);
-                            }
-                            else
-                            {
-
-                                client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-                                client.Tamer.AccountWarehouse.AddItemWithSlot(tempItem, srcSlot);
-                            }
-
-                        }
-                        else
-                        {
-                            client.Tamer.Inventory.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-                        }
-
-                        return true;
+                        return client.Tamer.AccountWarehouse.TryMoveAcrossLists(client.Tamer.Inventory, srcSlot, dstSlot);
                     }
 
                 case ItemListMovimentationEnum.AccountWarehouseToWarehouse:
                     {
                         var srcSlot = originSlot - GeneralSizeEnum.AccountWarehouseMinSlot.GetHashCode();
                         var dstSlot = destinationSlot - GeneralSizeEnum.WarehouseMinSlot.GetHashCode();
-
-                        var sourceItem = client.Tamer.AccountWarehouse.FindItemBySlot(srcSlot);
-                        var destItem = client.Tamer.Warehouse.FindItemBySlot(dstSlot);
-
-                        if (destItem.ItemId > 0)
-                        {
-                            var tempItem = (ItemModel)destItem.Clone();
-                            tempItem.SetItemInfo(destItem.ItemInfo);
-
-                            if (destItem.ItemId == sourceItem.ItemId)
-                            {
-                                destItem.IncreaseAmount(sourceItem.Amount);
-                                sourceItem.ReduceAmount(sourceItem.Amount);
-                            }
-                            else
-                            {
-
-                                client.Tamer.Warehouse.AddItemWithSlot(sourceItem, dstSlot);
-                                client.Tamer.AccountWarehouse.AddItemWithSlot(tempItem, srcSlot);
-                            }
-
-                        }
-                        else
-                        {
-                            client.Tamer.Warehouse.AddItemWithSlot(sourceItem, dstSlot);
-                            sourceItem.SetItemId();
-                        }
-
-                        return true;
+                        return client.Tamer.AccountWarehouse.TryMoveAcrossLists(client.Tamer.Warehouse, srcSlot, dstSlot);
                     }
             }
 
             return false;
+        }
+
+        private void BroadcastAppearanceUpdate(GameClient client, byte slot, ItemModel item, byte mode)
+        {
+            var packet = new UpdateTamerAppearancePacket(
+                client.Tamer.GeneralHandler,
+                slot,
+                item,
+                mode).Serialize();
+
+            if (client.DungeonMap)
+            {
+                _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId, packet);
+            }
+            else
+            {
+                _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId, packet);
+            }
+        }
+
+        private void SendStatusAndSpeed(GameClient client)
+        {
+            client.Send(new UpdateStatusPacket(client.Tamer));
+
+            var packet = new UpdateMovementSpeedPacket(client.Tamer).Serialize();
+            if (client.DungeonMap)
+            {
+                _dungeonServer.BroadcastForTamerViewsAndSelf(client.TamerId, packet);
+            }
+            else
+            {
+                _mapServer.BroadcastForTamerViewsAndSelf(client.TamerId, packet);
+            }
         }
     }
 }

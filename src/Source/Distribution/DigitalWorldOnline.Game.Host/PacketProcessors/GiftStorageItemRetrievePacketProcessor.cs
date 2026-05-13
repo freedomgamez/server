@@ -41,52 +41,38 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             if (withdrawType == 1)
             {
-
                 var targetItem = client.Tamer.GiftWarehouse.GiftFindItemBySlot(itemSlot);
-
-                if (targetItem != null)
+                if (targetItem != null && targetItem.ItemId > 0 && targetItem.Amount > 0)
                 {
+                    var destinationSlot = client.Tamer.Inventory.FindAvailableSlot(targetItem);
+                    if (destinationSlot >= 0 &&
+                        client.Tamer.GiftWarehouse.TryMoveAcrossLists(client.Tamer.Inventory, itemSlot, destinationSlot))
+                    {
+                        client.Send(new LoadGiftStoragePacket(client.Tamer.GiftWarehouse));
+                        client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
 
-                    var newItem = new ItemModel();
-                    newItem.SetItemId(targetItem.ItemId);
-                    newItem.SetAmount(targetItem.Amount);
-                    newItem.SetItemInfo(targetItem.ItemInfo);
-
-                    if (newItem.IsTemporary)
-                        newItem.SetRemainingTime((uint)newItem.ItemInfo.UsageTimeMinutes);
-
-                    client.Tamer.Inventory.AddItem(newItem);
-                    client.Tamer.GiftWarehouse.RemoveItem(targetItem, (short)itemSlot);
-                    client.Tamer.GiftWarehouse.UpdateGiftSlot();
-                    client.Send(new LoadGiftStoragePacket(client.Tamer.GiftWarehouse));
-                    client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
-
-                    await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
-                    await _sender.Send(new UpdateItemsCommand(client.Tamer.GiftWarehouse));
+                        await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
+                        await _sender.Send(new UpdateItemsCommand(client.Tamer.GiftWarehouse));
+                    }
                 }
 
             }
             else
             {
-                var Items = client.Tamer.GiftWarehouse.Items.Where(x => x.ItemId > 0).ToList();
+                var sourceSlots = client.Tamer.GiftWarehouse.Items
+                    .Where(x => x.ItemId > 0 && x.Amount > 0)
+                    .OrderBy(x => x.Slot)
+                    .Select(x => x.Slot)
+                    .ToList();
 
-                foreach (var targetItem in Items)
+                foreach (var sourceSlot in sourceSlots)
                 {
-
-                    if (targetItem != null)
+                    var sourceItem = client.Tamer.GiftWarehouse.GiftFindItemBySlot(sourceSlot);
+                    if (sourceItem != null && sourceItem.ItemId > 0 && sourceItem.Amount > 0)
                     {
-                        var newItem = new ItemModel();
-                        newItem.SetItemId(targetItem.ItemId);
-                        newItem.SetAmount(targetItem.Amount);
-                        newItem.SetItemInfo(targetItem.ItemInfo);
-
-                        if (newItem.IsTemporary)
-                            newItem.SetRemainingTime((uint)newItem.ItemInfo.UsageTimeMinutes);
-
-                        client.Tamer.Inventory.AddItem(newItem);
-                        client.Tamer.GiftWarehouse.RemoveItem(targetItem, (short)targetItem.Slot);
-
-
+                        var destinationSlot = client.Tamer.Inventory.FindAvailableSlot(sourceItem);
+                        if (destinationSlot >= 0)
+                            client.Tamer.GiftWarehouse.TryMoveAcrossLists(client.Tamer.Inventory, sourceSlot, destinationSlot);
                     }
                 }
 

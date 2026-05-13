@@ -132,7 +132,9 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     var Ts = 0;
 
                     if (buffToApply.Duration != 0)
-                        Ts = UtilitiesFunctions.RemainingTimeSeconds(buffToApply.RemainingSeconds);
+                        Ts = Math.Max(1, buffToApply.RemainingSeconds);
+                    else
+                        Ts = unchecked((int)uint.MaxValue);
 
                     if (client.DungeonMap)
                     {

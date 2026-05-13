@@ -73,8 +73,9 @@ namespace DigitalWorldOnline.Commons.Entities
                 IPEndPoint localEndPoint = new IPEndPoint(ipAddress, int.Parse(port));
                 ServerListener?.Bind(localEndPoint);
             }
-            catch (SocketException)
+            catch (SocketException ex)
             {
+                Console.WriteLine($"[Listen] Socket bind failed for {address}:{port} - {ex.SocketErrorCode} - {ex.Message}");
                 Shutdown();
                 return false;
             }

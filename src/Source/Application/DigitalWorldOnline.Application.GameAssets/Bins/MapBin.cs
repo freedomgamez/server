@@ -26,7 +26,9 @@ public sealed record MapPortalRecord(
     int DestX,
     int DestY,
     int DestRadius,
-    int UniqObjectId);
+    int PortalObjectType,
+    int UniqObjectId,
+    int PortalKindIndex);
 
 public sealed record MapRegionRecord(
     int MapId,

@@ -81,7 +81,7 @@ namespace DigitalWorldOnline.Commons.Models.Map
 
         public bool RequestMobsUpdate(IList<MobConfigModel> mapMobs)
         {
-            UpdateMobs = /*NeedToAddMobs(mapMobs) ||*/ NeedToRemoveMobs(mapMobs);
+            UpdateMobs = NeedToAddMobs(mapMobs) || NeedToRemoveMobs(mapMobs);
 
             return UpdateMobs;
         }

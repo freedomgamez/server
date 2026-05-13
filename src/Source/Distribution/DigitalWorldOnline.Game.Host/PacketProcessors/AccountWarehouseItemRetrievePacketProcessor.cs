@@ -36,29 +36,30 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         {
             var packet = new GamePacketReader(packetData);
 
-
             var itemSlot = packet.ReadShort();
+            var sourceList = client.Tamer.AccountCashWarehouse;
+            var targetItem = sourceList.FindItemBySlot(itemSlot);
 
-            var targetItem = client.Tamer.AccountCashWarehouse.FindItemBySlot(itemSlot);
-
-            if (targetItem != null)
+            if (targetItem != null && targetItem.ItemId > 0 && targetItem.Amount > 0)
             {
-
-                var NewItem = (ItemModel)targetItem.Clone();
-
-                NewItem.SetItemInfo(targetItem.ItemInfo);
-
-                if (NewItem.IsTemporary)
-                    NewItem.SetRemainingTime((uint)NewItem.ItemInfo.UsageTimeMinutes);
-
-                if (client.Tamer.Inventory.AddItem(NewItem))
+                var destinationSlot = client.Tamer.Inventory.FindAvailableSlot(targetItem);
+                if (destinationSlot < 0)
                 {
+                    client.Send(new LoadAccountWarehousePacket(client.Tamer.AccountCashWarehouse));
+                    client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+                    return;
+                }
 
-                    client.Tamer.AccountCashWarehouse.RemoveOrReduceItem(targetItem,targetItem.Amount);
+                var canRetrieve = sourceList.TryMoveAcrossLists(client.Tamer.Inventory, itemSlot, destinationSlot);
 
-                    client.Tamer.AccountCashWarehouse.Sort();
+                if (canRetrieve)
+                {
+                    sourceList.Sort();
+                    var retrievedItem = client.Tamer.Inventory.FindItemBySlot(destinationSlot);
+                    if (retrievedItem == null || retrievedItem.ItemId <= 0 || retrievedItem.Amount <= 0)
+                        return;
 
-                    client.Send(new AccountWarehouseItemRetrievePacket(NewItem, itemSlot));
+                    client.Send(new AccountWarehouseItemRetrievePacket(retrievedItem, itemSlot));
 
                     client.Send(new LoadAccountWarehousePacket(client.Tamer.AccountCashWarehouse));
                     client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
@@ -68,8 +69,14 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 }
                 else
                 {
-
+                    client.Send(new LoadAccountWarehousePacket(client.Tamer.AccountCashWarehouse));
+                    client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
                 }
+            }
+            else
+            {
+                client.Send(new LoadAccountWarehousePacket(client.Tamer.AccountCashWarehouse));
+                client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
             }
 
         }

@@ -1,6 +1,5 @@
 ﻿using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
-using DigitalWorldOnline.Application.Separar.Commands.Create;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums;
@@ -8,15 +7,13 @@ using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Models.Base;
-using DigitalWorldOnline.Commons.Models.Chat;
 using DigitalWorldOnline.Commons.Packets.Chat;
 using DigitalWorldOnline.Commons.Packets.GameServer;
+using DigitalWorldOnline.Commons.Packets.Items;
 using DigitalWorldOnline.Commons.Utils;
 using DigitalWorldOnline.GameHost;
 using MediatR;
-using Newtonsoft.Json.Linq;
 using Serilog;
-using System.Net.Sockets;
 
 namespace DigitalWorldOnline.Game.PacketProcessors
 {
@@ -44,9 +41,45 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var packet = new GamePacketReader(packetData);
 
             _ = packet.ReadInt();
-            var vipEnabled = packet.ReadByte();
-            int npcId = packet.ReadInt();
-            short slot = packet.ReadShort();
+            int remaining = (packet.Length - 2) - (int)packet.Packet.Position;
+            if (remaining < 6)
+            {
+                client.Send(UtilitiesFunctions.GroupPackets(
+                    new ItemSocketIdentifyPacket(new ItemModel(), (int)client.Tamer.Inventory.Bits).Serialize(),
+                    new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()));
+                return;
+            }
+
+            // v487 payload can be:
+            // [Npc:int][Slot:short] OR [Vip:byte][Npc:int][Slot:short]
+            // OR include portable slot before npc (4 extra bytes).
+            short slot;
+            if (remaining == 6)
+            {
+                _ = packet.ReadInt(); // npcId
+                slot = packet.ReadShort();
+            }
+            else if (remaining == 7)
+            {
+                _ = packet.ReadByte(); // vip
+                _ = packet.ReadInt();  // npcId
+                slot = packet.ReadShort();
+            }
+            else if (remaining == 10)
+            {
+                _ = packet.ReadInt();  // portableSlot
+                _ = packet.ReadInt();  // npcId
+                slot = packet.ReadShort();
+            }
+            else // 11 or greater
+            {
+                _ = packet.ReadByte(); // vip
+                _ = packet.ReadInt();  // portableSlot
+                _ = packet.ReadInt();  // npcId
+                slot = packet.ReadShort();
+            }
+
+            _logger.Information("ItemSocketIdentify request: tamer={TamerId} slot={Slot} payloadLen={PayloadLen}", client.TamerId, slot, remaining);
 
             await ItemIdentify(client, slot);
 
@@ -56,8 +89,21 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         {
             var itemInfo = client.Tamer.Inventory.FindItemBySlot(slot);
 
-            if (itemInfo != null)
+            if (itemInfo != null && itemInfo.ItemId > 0 && itemInfo.ItemInfo != null)
             {
+                _logger.Information("ItemSocketIdentify processing: tamer={TamerId} slot={Slot} item={ItemId}", client.TamerId, slot, itemInfo.ItemId);
+                if (itemInfo.ItemInfo.SkillInfo == null || itemInfo.ItemInfo.SkillInfo.Apply == null || itemInfo.ItemInfo.SkillInfo.Apply.Count == 0)
+                {
+                    client.Send(
+                        UtilitiesFunctions.GroupPackets(
+                            new ItemSocketIdentifyPacket(itemInfo, (int)client.Tamer.Inventory.Bits).Serialize(),
+                            new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
+                        )
+                    );
+                    _logger.Warning("ItemSocketIdentify no-skillinfo fallback: tamer={TamerId} slot={Slot} item={ItemId}", client.TamerId, slot, itemInfo.ItemId);
+                    return;
+                }
+
                 client.Tamer.Inventory.RemoveBits(itemInfo.ItemInfo.ScanPrice / 2);
                 var i = 0;
 
@@ -76,8 +122,13 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                     int valorAleatorio = (int)((double)ApplyRate * nValue / 100);
 
-                    itemInfo.AccessoryStatus[i].SetType((AccessoryStatusTypeEnum)apply.Attribute);
-                    itemInfo.AccessoryStatus[i].SetValue((short)valorAleatorio);
+                    if (itemInfo.AccessoryStatus != null &&
+                        itemInfo.AccessoryStatus.Count > i &&
+                        TryMapAccessoryStatusType(apply.Attribute, out var mappedStatusType))
+                    {
+                        itemInfo.AccessoryStatus[i].SetType(mappedStatusType);
+                        itemInfo.AccessoryStatus[i].SetValue((short)valorAleatorio);
+                    }
 
                     itemInfo.SetPower((byte)ApplyRate); //TODO: externalizar
                     itemInfo.SetReroll(100);
@@ -85,10 +136,26 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     break;
                 }
 
-                client.Send(new ItemSocketIdentifyPacket(itemInfo,(int)client.Tamer.Inventory.Bits));
-
                 await _sender.Send(new UpdateItemAccessoryStatusCommand(itemInfo));
                 await _sender.Send(new UpdateItemListBitsCommand(client.Tamer.Inventory));
+                client.Send(
+                    UtilitiesFunctions.GroupPackets(
+                        new ItemSocketIdentifyPacket(itemInfo, (int)client.Tamer.Inventory.Bits).Serialize(),
+                        new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
+                    )
+                );
+                _logger.Information("ItemSocketIdentify success: tamer={TamerId} slot={Slot} item={ItemId} power={Power}", client.TamerId, slot, itemInfo.ItemId, itemInfo.Power);
+            }
+            else
+            {
+                client.Send(
+                    UtilitiesFunctions.GroupPackets(
+                        new ItemSocketIdentifyPacket(new ItemModel(), (int)client.Tamer.Inventory.Bits).Serialize(),
+                        new SystemMessagePacket($"Invalid item.").Serialize(),
+                        new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
+                    )
+                );
+                _logger.Warning("ItemSocketIdentify invalid-item fallback: tamer={TamerId} slot={Slot}", client.TamerId, slot);
             }
         }
 
@@ -138,6 +205,30 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
 
 
+        }
+
+        private static bool TryMapAccessoryStatusType(
+            SkillCodeApplyAttributeEnum attribute,
+            out AccessoryStatusTypeEnum mappedType)
+        {
+            mappedType = attribute switch
+            {
+                SkillCodeApplyAttributeEnum.AT => AccessoryStatusTypeEnum.AT,
+                SkillCodeApplyAttributeEnum.DP => AccessoryStatusTypeEnum.DE,
+                SkillCodeApplyAttributeEnum.HP => AccessoryStatusTypeEnum.HP,
+                SkillCodeApplyAttributeEnum.DS => AccessoryStatusTypeEnum.DS,
+                SkillCodeApplyAttributeEnum.SCD => AccessoryStatusTypeEnum.SCD,
+                SkillCodeApplyAttributeEnum.SkillDamageByAttribute => AccessoryStatusTypeEnum.ATT,
+                SkillCodeApplyAttributeEnum.CA => AccessoryStatusTypeEnum.CT,
+                SkillCodeApplyAttributeEnum.ER => AccessoryStatusTypeEnum.CD,
+                SkillCodeApplyAttributeEnum.AS => AccessoryStatusTypeEnum.AS,
+                SkillCodeApplyAttributeEnum.EV => AccessoryStatusTypeEnum.EV,
+                SkillCodeApplyAttributeEnum.BL => AccessoryStatusTypeEnum.BL,
+                SkillCodeApplyAttributeEnum.HT => AccessoryStatusTypeEnum.HT,
+                _ => default
+            };
+
+            return mappedType != default;
         }
     }
 }

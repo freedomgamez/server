@@ -7,6 +7,7 @@ using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Packets.Chat;
 using DigitalWorldOnline.Commons.Packets.MapServer;
+using DigitalWorldOnline.Game.Services;
 using DigitalWorldOnline.GameHost;
 using MediatR;
 using Microsoft.Extensions.Configuration;
@@ -23,8 +24,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly IConfiguration _configuration;
         private readonly ISender _sender;
         private readonly ILogger _logger;
+        private readonly OwnerStorageFlushService _ownerStorageFlushService;
 
-        private const string GameServerAddress = "GameServer:Address";
         private const string GamerServerPublic = "GameServer:PublicAddress";
         private const string GameServerPort = "GameServer:Port";
 
@@ -32,12 +33,14 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             MapServer mapServer,
             IConfiguration configuration,
             ISender sender,
-            ILogger logger)
+            ILogger logger,
+            OwnerStorageFlushService ownerStorageFlushService)
         {
             _configuration = configuration;
             _mapServer = mapServer;
             _sender = sender;
             _logger = logger;
+            _ownerStorageFlushService = ownerStorageFlushService;
         }
 
         public async Task Process(GameClient client, byte[] packetData)
@@ -77,6 +80,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 _logger.Verbose($"Character {client.TamerId}  summoned to map {targetClient.Tamer.Location.MapId} with GM Commands");
 
 
+                await _ownerStorageFlushService.FlushForTransitionAsync(client);
                 _mapServer.RemoveClient(client);
 
                 var destination = waypoints.Regions.First();

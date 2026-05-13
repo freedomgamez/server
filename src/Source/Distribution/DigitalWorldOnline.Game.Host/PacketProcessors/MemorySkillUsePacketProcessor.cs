@@ -378,6 +378,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     double addedDmg = Math.Floor(baseDmg * skillFactor / 100.0);
 
                     finalDmg = (int)Math.Floor(baseDmg + addedDmg + client.Tamer.Partner.AT + client.Tamer.Partner.SKD);
+                    finalDmg = ApplySkillDamagePercentBonus(finalDmg, client.Tamer.Partner.SkillDamagePercent);
                     if (finalDmg <= 0) finalDmg = 1;
                 }
 
@@ -472,6 +473,19 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     _logger.Verbose("Tamer {TamerId} hit mob {MobId} for {Dmg} with memory skill {SkillId}.",
                         client.TamerId, targetMob.Id, finalDmg, skillCode);
                 }
+            }
+
+            static int ApplySkillDamagePercentBonus(int baseDamage, int percentPoints)
+            {
+                if (baseDamage <= 0 || percentPoints == 0)
+                    return baseDamage;
+
+                long scaled = (long)baseDamage * (100L + percentPoints);
+                long adjusted = scaled / 100L;
+
+                if (adjusted > int.MaxValue) return int.MaxValue;
+                if (adjusted < int.MinValue) return int.MinValue;
+                return (int)adjusted;
             }
 
             // Cooldown: `SkillInfoAssetModel.Cooldown` is ALREADY in milliseconds —

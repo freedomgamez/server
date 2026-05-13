@@ -1,4 +1,5 @@
-﻿using DigitalWorldOnline.Commons.Enums.ClientEnums;
+﻿using DigitalWorldOnline.Application.Separar.Commands.Update;
+using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Enums.Map;
 using DigitalWorldOnline.Commons.Models.Base;
 using DigitalWorldOnline.Commons.Models.Config;
@@ -538,7 +539,7 @@ namespace DigitalWorldOnline.GameHost.EventsServer
             }
 
             map.BroadcastForTargetTamers(mob.RaidDamage.Select(x => x.Key).ToList(), writer.Serialize());
-            //updateItemList.ForEach(itemList => { _sender.Send(new UpdateItemsCommand(itemList)); });
+            updateItemList.ForEach(itemList => { _sender.Send(new UpdateItemsCommand(itemList)).GetAwaiter().GetResult(); });
         }
     }
 }

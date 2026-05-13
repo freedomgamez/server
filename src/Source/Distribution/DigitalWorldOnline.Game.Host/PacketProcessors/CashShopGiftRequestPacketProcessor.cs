@@ -171,7 +171,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 if (product.Price - debitPremium > 0)
                     client.AddSilk(product.Price - debitPremium);
                 foreach (var item in rollback)
-                    peerWarehouse.RemoveOrReduceItem(item, item.Amount);
+                    peerWarehouse.RemoveOrReduceItem(item, item.Amount, item.Slot);
 
                 Reply(client, CashShopGiftResponsePacket.ResultUnknownProduct, peerName, nProductIDX);
                 return;

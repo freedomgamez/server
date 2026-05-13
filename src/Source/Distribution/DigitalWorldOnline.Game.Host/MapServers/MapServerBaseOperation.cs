@@ -8,6 +8,7 @@ using DigitalWorldOnline.Commons.Models.Config;
 using DigitalWorldOnline.Commons.Models.Map;
 using DigitalWorldOnline.Commons.Models.Summon;
 using DigitalWorldOnline.Commons.Models.TamerShop;
+using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
 using System.Linq;
 
@@ -64,7 +65,7 @@ namespace DigitalWorldOnline.GameHost
             {
                 foreach (var map in Maps.Where(x => x.Initialized))
                 {
-                    var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(map.Id), cancellationToken));
+                    var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(map.MapId), cancellationToken));
 
                     if (map.RequestMobsUpdate(mapMobs))
                         map.UpdateMobsList();
@@ -88,7 +89,10 @@ namespace DigitalWorldOnline.GameHost
                     if (map.Operating)
                         continue;
 
-                    var consignedShops = _mapper.Map<List<ConsignedShop>>(await _sender.Send(new ConsignedShopsQuery((int)map.Id), cancellationToken));
+                    using var scope = _scopeFactory.CreateScope();
+                    var serverQueriesRepository = scope.ServiceProvider.GetRequiredService<Commons.Interfaces.IServerQueriesRepository>();
+                    var consignedShopDtos = await serverQueriesRepository.GetConsignedShopsAsync((int)map.Id);
+                    var consignedShops = _mapper.Map<List<ConsignedShop>>(consignedShopDtos);
 
                     map.UpdateConsignedShops(consignedShops);
                 }

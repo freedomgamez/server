@@ -12,9 +12,8 @@ using DigitalWorldOnline.Commons.Packets.Chat;
 using DigitalWorldOnline.Commons.Packets.GameServer;
 using DigitalWorldOnline.Commons.Packets.MapServer;
 using DigitalWorldOnline.Game.Managers;
+using DigitalWorldOnline.Game.Services;
 using DigitalWorldOnline.GameHost;
-
-
 using MediatR;
 using Microsoft.Extensions.Configuration;
 using Serilog;
@@ -25,7 +24,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
     {
         public GameServerPacketEnum Type => GameServerPacketEnum.WarpGateDungeon;
 
-        private const string GameServerAddress = "GameServer:Address";
         private const string GamerServerPublic = "GameServer:PublicAddress";
         private const string GameServerPort = "GameServer:Port";
 
@@ -36,6 +34,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly DungeonsServer _dungeonServer;
         private readonly ISender _sender;
         private readonly ILogger _logger;
+        private readonly OwnerStorageFlushService _ownerStorageFlushService;
 
         public WarpGateDungeonPacketProcessor(
             PartyManager partyManager,
@@ -44,7 +43,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             MapServer mapServer,
             ISender sender,
             ILogger logger,
-            DungeonsServer dungeonServer)
+            DungeonsServer dungeonServer,
+            OwnerStorageFlushService ownerStorageFlushService)
         {
             _partyManager = partyManager;
             _configuration = configuration;
@@ -53,6 +53,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _sender = sender;
             _logger = logger;
             _dungeonServer = dungeonServer;
+            _ownerStorageFlushService = ownerStorageFlushService;
         }
 
         public async Task Process(GameClient client, byte[] packetData)
@@ -62,8 +63,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var portalId = packet.ReadInt();
 
             var portal = _assets.Portal.FirstOrDefault(x => x.Id == portalId);
-
-            var portalRequestInfo = _assets.Npcs.FirstOrDefault(x => x.NpcId == portal.NpcId).Portals.ToList();
 
             if (portal == null)
             {
@@ -81,6 +80,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     return;
                 }
 
+                await _ownerStorageFlushService.FlushForTransitionAsync(client);
                 if (client.DungeonMap)
                 {
                     _dungeonServer.RemoveClient(client);
@@ -113,45 +113,16 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
             else
             {
-                if (portalRequestInfo != null)
+                if (!await TryConsumePortalRequirementAsync(client, portal))
                 {
-                    var Request = portalRequestInfo.SelectMany(x => x.PortalsAsset).ToList();
-
-                    var RemoveInfo = Request[portal.PortalIndex];
-
-                    for (int i = 0; i < 3; i++)
-                    {
-
-                        switch (RemoveInfo.npcPortalsAsset[i].Type)
-                        {
-                            case NpcResourceTypeEnum.Money:
-                                {
-
-                                    client.Tamer.Inventory.RemoveBits(RemoveInfo.npcPortalsAsset[i].ItemId);
-
-                                    await _sender.Send(new UpdateItemListBitsCommand(client.Tamer.Inventory));
-
-                                }
-                                break;
-
-                            case NpcResourceTypeEnum.Item:
-                                {
-                                    var targeItem = client.Tamer.Inventory.FindItemById(RemoveInfo.npcPortalsAsset[i].ItemId);
-
-                                    if (targeItem != null)
-                                    {
-                                        client.Tamer.Inventory.RemoveOrReduceItem(targeItem, 1)
-                                            ;
-                                        await _sender.Send(new UpdateItemCommand(targeItem));
-                                    }
-
-                                }
-                                break;
-                        }
-                    }
+                    return;
                 }
 
-                _mapServer.RemoveClient(client);
+                await _ownerStorageFlushService.FlushForTransitionAsync(client);
+                if (client.DungeonMap)
+                    _dungeonServer.RemoveClient(client);
+                else
+                    _mapServer.RemoveClient(client);
 
                 client.Tamer.NewLocation(portal.DestinationMapId, portal.DestinationX, portal.DestinationY);
                 await _sender.Send(new UpdateCharacterLocationCommand(client.Tamer.Location));
@@ -190,5 +161,89 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             //client.Send(new SendHandler(client.Tamer.GeneralHandler));
 
         }
+
+        private async Task<bool> TryConsumePortalRequirementAsync(GameClient client, Commons.Models.Asset.PortalAssetModel portal)
+        {
+            var npcAsset = _assets.Npcs.FirstOrDefault(x =>
+                x.NpcId == portal.NpcId &&
+                x.MapId == client.Tamer.Location.MapId);
+
+            if (npcAsset == null)
+                return true;
+
+            if (portal.PortalIndex < 0 || portal.PortalIndex >= npcAsset.Portals.Count)
+                return true;
+
+            var npcPortal = npcAsset.Portals[portal.PortalIndex];
+            var requirements = (npcPortal.PortalsAsset ?? new List<DigitalWorldOnline.Commons.DTOs.Assets.NpcPortalsAmountAssetModel>())
+                .Where(x => x?.npcPortalsAsset != null)
+                .SelectMany(x => x.npcPortalsAsset)
+                .Where(x => x != null && x.Type != NpcResourceTypeEnum.None)
+                .ToList();
+
+            if (!requirements.Any())
+                return true;
+
+            foreach (var requirement in requirements)
+            {
+                if (requirement.Type == NpcResourceTypeEnum.Item)
+                {
+                    var requiredItemId = requirement.ItemId;
+                    var requiredAmount = requirement.ResourceAmount > 0 ? requirement.ResourceAmount : 1;
+                    var available = client.Tamer.Inventory.FindItemsById(requiredItemId).Sum(x => x.Amount);
+                    if (available < requiredAmount)
+                    {
+                        client.Send(new SystemMessagePacket("Insufficient required item amount."));
+                        _logger.Warning(
+                            "Dungeon warp denied: tamer {TamerId} missing NPC-portal item {ItemId} x{Amount} for portal {PortalId}.",
+                            client.TamerId, requiredItemId, requiredAmount, portal.Id);
+                        return false;
+                    }
+                }
+                else if (requirement.Type == NpcResourceTypeEnum.Money)
+                {
+                    var requiredBits = requirement.ItemId > 0 ? requirement.ItemId : requirement.ResourceAmount;
+                    if (requiredBits > 0 && client.Tamer.Inventory.Bits < requiredBits)
+                    {
+                        client.Send(new SystemMessagePacket("Insufficient bits amount."));
+                        _logger.Warning(
+                            "Dungeon warp denied: tamer {TamerId} missing NPC-portal bits {Bits} for portal {PortalId}.",
+                            client.TamerId, requiredBits, portal.Id);
+                        return false;
+                    }
+                }
+            }
+
+            var itemsChanged = false;
+            var bitsChanged = false;
+            foreach (var requirement in requirements)
+            {
+                if (requirement.Type == NpcResourceTypeEnum.Item)
+                {
+                    var requiredAmount = requirement.ResourceAmount > 0 ? requirement.ResourceAmount : 1;
+                    if (client.Tamer.Inventory.RemoveOrReduceItemsByItemId(requirement.ItemId, requiredAmount))
+                    {
+                        itemsChanged = true;
+                    }
+                }
+                else if (requirement.Type == NpcResourceTypeEnum.Money)
+                {
+                    var requiredBits = requirement.ItemId > 0 ? requirement.ItemId : requirement.ResourceAmount;
+                    if (requiredBits > 0 && client.Tamer.Inventory.RemoveBits(requiredBits))
+                    {
+                        bitsChanged = true;
+                    }
+                }
+            }
+
+            if (itemsChanged)
+                await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
+
+            if (bitsChanged)
+                await _sender.Send(new UpdateItemListBitsCommand(client.Tamer.Inventory));
+
+            return true;
+        }
+
     }
 }

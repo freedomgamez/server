@@ -94,6 +94,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             if (TargetSkillInfo.IsPassive)
                                 return;
 
+                            // Resource costs come from Skill.bin (CsSkill::s_nUseHP/s_nUseDS).
+                            // Mirror partner/memory-skill behavior so tamer-skill casts are
+                            // not effectively free on the partner resource bars.
+                            client.Partner.ReceiveDamage(TargetSkillInfo.HPUsage);
+                            client.Partner.UseDs(TargetSkillInfo.DSUsage);
+
                             var TargetType = (SkillTargetTypeEnum)TargetSkillInfo.Target;
 
 
@@ -133,7 +139,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
         private async Task TamerSkillUniqueTarget(GameClient client, int SkillId, TamerSkillAssetModel? targetSkill, BuffInfoAssetModel? targetBuffInfo, SkillInfoAssetModel? TargetSkillInfo)
         {
-            var duration = UtilitiesFunctions.RemainingTimeSeconds(targetSkill.Duration);
+            var duration = Math.Max(1, targetSkill.Duration);
 
             client.Send(new TamerSkillRequestPacket(SkillId, targetBuffInfo.BuffId, duration));
 
@@ -158,7 +164,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                 if (buffToRemove != null)
                 {
-                    duration = UtilitiesFunctions.RemainingTimeSeconds(targetSkill.Duration);
+                    duration = Math.Max(1, targetSkill.Duration);
 
                     client.Tamer.Partner.BuffList.Buffs.Remove(buffToRemove);
 
@@ -251,7 +257,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                             if (targetClient != null)
                             {
-                                var duration = UtilitiesFunctions.RemainingTimeSeconds(targetSkill.Duration);
+                                var duration = Math.Max(1, targetSkill.Duration);
 
                                 if (targetClient.Tamer.Id == client.Tamer.Id)
                                 {
@@ -332,7 +338,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                             if (targetClient != null)
                             {
-                                var duration = UtilitiesFunctions.RemainingTimeSeconds(targetSkill.Duration);
+                                var duration = Math.Max(1, targetSkill.Duration);
 
                                 if (targetClient.Tamer.Id == client.Tamer.Id)
                                 {
@@ -363,7 +369,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                                     if (buffToRemove != null)
                                     {
-                                        duration = UtilitiesFunctions.RemainingTimeSeconds(targetSkill.Duration + buffToRemove.RemainingSeconds);
+                                        duration = Math.Max(1, targetSkill.Duration + buffToRemove.RemainingSeconds);
 
                                         targetClient.Tamer.Partner.BuffList.Buffs.Remove(buffToRemove);
 
@@ -426,7 +432,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             }
             else
             {
-                var duration = UtilitiesFunctions.RemainingTimeSeconds(targetSkill.Duration);
+                var duration = Math.Max(1, targetSkill.Duration);
 
                 client.Send(new TamerSkillRequestPacket(SkillId, targetBuffInfo.BuffId, duration));
 
@@ -439,7 +445,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
                     if (buffToRemove != null)
                     {
-                        duration = UtilitiesFunctions.RemainingTimeSeconds(targetSkill.Duration + buffToRemove.RemainingSeconds);
+                        duration = Math.Max(1, targetSkill.Duration + buffToRemove.RemainingSeconds);
 
                         client.Tamer.Partner.BuffList.Buffs.Remove(buffToRemove);
 

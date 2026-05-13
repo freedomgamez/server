@@ -108,16 +108,60 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             // no mobs ever spawn for the player.
             async Task EnsureListAsync(ItemListEnum t)
             {
-                if (character.ItemList.Any(x => x.Type == t)) return;
-                _logger.Information("Account {AccountId} missing ItemList type {Type}; backfilling row + in-memory model.",
-                    account.Id, t);
+                if (account.ItemList.Any(x => x.Type == t)) return;
                 await _sender.Send(new CreateAccountItemListCommand(account.Id, t));
-                character.AddItemList(new ItemListModel(t));
+
+                var refreshedAccount = _mapper.Map<AccountModel>(await _sender.Send(new AccountByIdQuery(account.Id)));
+                var persistedList = refreshedAccount.ItemList.FirstOrDefault(x => x.Type == t);
+
+                if (persistedList != null)
+                {
+                    character.AddItemList(persistedList);
+                    return;
+                }
+                
+                _logger.Error("Account list creation did not materialize persisted list. accountId={AccountId} type={Type}", account.Id, t);
+                throw new InvalidOperationException($"Missing persisted account item list {t} for account {account.Id}.");
             }
             await EnsureListAsync(ItemListEnum.AccountWarehouse);
             await EnsureListAsync(ItemListEnum.CashWarehouse);
             await EnsureListAsync(ItemListEnum.ShopWarehouse);
             await EnsureListAsync(ItemListEnum.BuyHistory);
+
+            // Character-owned required lists (legacy/migrated tamers can be missing
+            // rows after item-system transition). Keep the runtime model complete so
+            // stats/packets that require Equipment/Inventory etc. never explode.
+            async Task EnsureCharacterListAsync(ItemListEnum type)
+            {
+                if (character.ItemList.Any(x => x.Type == type))
+                    return;
+
+                await _sender.Send(new CreateCharacterItemListCommand(character.Id, type));
+
+                var refreshedCharacter = _mapper.Map<CharacterModel>(await _sender.Send(new CharacterByIdQuery(character.Id)));
+                var persistedList = refreshedCharacter.ItemList.FirstOrDefault(x => x.Type == type);
+                if (persistedList != null)
+                {
+                    character.AddItemList(persistedList);
+                    return;
+                }
+
+                _logger.Error("Character list creation did not materialize persisted list. characterId={CharacterId} type={Type}", character.Id, type);
+                throw new InvalidOperationException($"Missing persisted character item list {type} for character {character.Id}.");
+            }
+
+            await EnsureCharacterListAsync(ItemListEnum.Equipment);
+            await EnsureCharacterListAsync(ItemListEnum.Inventory);
+            await EnsureCharacterListAsync(ItemListEnum.Warehouse);
+            await EnsureCharacterListAsync(ItemListEnum.Chipsets);
+            await EnsureCharacterListAsync(ItemListEnum.JogressChipset);
+            await EnsureCharacterListAsync(ItemListEnum.Digivice);
+            await EnsureCharacterListAsync(ItemListEnum.TamerSkill);
+            await EnsureCharacterListAsync(ItemListEnum.RewardWarehouse);
+            await EnsureCharacterListAsync(ItemListEnum.GiftWarehouse);
+            await EnsureCharacterListAsync(ItemListEnum.ConsignedWarehouse);
+            await EnsureCharacterListAsync(ItemListEnum.TamerShop);
+            await EnsureCharacterListAsync(ItemListEnum.ConsignedShop);
 
             foreach (var digimon in character.Digimons)
             {
@@ -264,32 +308,25 @@ namespace DigitalWorldOnline.Game.PacketProcessors
 
             await ReceiveArenaPoints(client);
 
-            // Diagnostic: dump InitialInfoPacket bytes to file for offset analysis.
+            // EvoSlot lookup: client's CDigimonEvolveObj::m_nEvoSlot comes from
+            // DigimonEvo.bin's "Ev0_num" column — a 1-based per-tree slot index,
+            // NOT the global nEvo:: enum value from Digimon_List.bin's s_eEvolutionType.
+            // (CDigimonEvolution.cpp:170 — pEvolveObj->m_nEvoSlot = atoi(... "Ev0_num"))
+            // We scan every tree's DigimonEvoLine list to find the form's EvoSlot;
+            // returns 0 when unmapped so the packet writer falls back to (i+1).
+            byte EvoSlotFor(int formType)
             {
-                // EvoSlot lookup: client's CDigimonEvolveObj::m_nEvoSlot comes from
-                // DigimonEvo.bin's "Ev0_num" column — a 1-based per-tree slot index,
-                // NOT the global nEvo:: enum value from Digimon_List.bin's s_eEvolutionType.
-                // (CDigimonEvolution.cpp:170 — pEvolveObj->m_nEvoSlot = atoi(... "Ev0_num"))
-                // We scan every tree's DigimonEvoLine list to find the form's EvoSlot;
-                // returns 0 when unmapped so the packet writer falls back to (i+1).
-                byte EvoSlotFor(int formType)
+                foreach (var tree in _digimonEvo.Data.ByType.Values)
                 {
-                    foreach (var tree in _digimonEvo.Data.ByType.Values)
+                    foreach (var line in tree.Lines)
                     {
-                        foreach (var line in tree.Lines)
-                        {
-                            if (line.Type == formType)
-                                return (byte)line.EvoSlot;
-                        }
+                        if (line.Type == formType)
+                            return (byte)line.EvoSlot;
                     }
-                    return 0;
                 }
-                var __pkt = new InitialInfoPacket(character, party, EvoSlotFor);
-                var __bytes = __pkt.Serialize();
-                System.IO.File.WriteAllBytes("/tmp/initgamedata_dump.bin", __bytes);
-                _logger.Information($"Dumped InitialInfoPacket: {__bytes.Length} bytes -> /tmp/initgamedata_dump.bin");
-                client.Send(__bytes);
+                return 0;
             }
+            client.Send(new InitialInfoPacket(character, party, EvoSlotFor));
 
 
 

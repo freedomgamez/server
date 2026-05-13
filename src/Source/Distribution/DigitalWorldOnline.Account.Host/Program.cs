@@ -45,11 +45,17 @@ namespace DigitalWorldOnline.Account
             AppDomain.CurrentDomain.UnhandledException += UnhandledExceptionHandler;
             Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
 
-            return Host.CreateDefaultBuilder(args)
+            var host = Host.CreateDefaultBuilder(args)
                 .UseSerilog()
                 .UseEnvironment("Development")
+                .UseDefaultServiceProvider((_, options) =>
+                {
+                    options.ValidateOnBuild = false;
+                })
                 .ConfigureServices((context, services) =>
                 {
+                    services.AddScoped<StoragePersistenceDualWriteCoordinator>();
+
                     services.AddDsoDatabase(context.Configuration);
 
                     services.AddScoped<IAdminQueriesRepository, AdminQueriesRepository>();
@@ -74,7 +80,6 @@ namespace DigitalWorldOnline.Account
                     services.AddSingleton<ISender, ScopedSender<Mediator>>();
                     services.AddSingleton<IProcessor, AuthenticationPacketProcessor>();
                     services.AddSingleton(ConfigureLogger(context.Configuration));
-
                     services.AddHostedService<AuthenticationServer>();
                     services.AddMediatR(typeof(MediatorApplicationHandlerExtension).GetTypeInfo().Assembly);
                     services.AddTransient<Mediator>();
@@ -93,6 +98,8 @@ namespace DigitalWorldOnline.Account
                     hostConfig.AddEnvironmentVariables("DSO_");
                 })
                 .Build();
+
+            return host;
         }
 
         private static ILogger ConfigureLogger(IConfiguration configuration)

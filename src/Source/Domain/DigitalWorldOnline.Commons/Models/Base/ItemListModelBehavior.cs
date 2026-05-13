@@ -183,9 +183,10 @@ namespace DigitalWorldOnline.Commons.Models.Base
 
         public int FindAvailableSlot(ItemModel targetItem)
         {
+            var overlap = targetItem.ItemInfo?.Overlap > 0 ? targetItem.ItemInfo.Overlap : (short)1;
             var slot = Items.FindIndex(x =>
                 x.ItemId == targetItem.ItemId &&
-                x.Amount + targetItem.Amount < targetItem.ItemInfo.Overlap);
+                x.Amount + targetItem.Amount <= overlap);
 
             if (slot < 0)
                 slot = GetEmptySlot;
@@ -255,11 +256,31 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// </summary>
         public int GetEmptySlot => Items.FindIndex(x => x.ItemId == 0);
 
+        public string DebugSummaryForItem(int itemId, int amount)
+        {
+            var emptySlots = TotalEmptySlots;
+            var itemSlots = FindItemsById(itemId, true);
+            var stackableSlots = itemSlots
+                .Where(x => x.ItemId == itemId && x.ItemInfo != null && x.ItemInfo.Overlap > 1)
+                .ToList();
+            var stackCapacity = stackableSlots.Sum(x =>
+            {
+                var free = x.ItemInfo.Overlap - x.Amount;
+                return free > 0 ? free : 0;
+            });
+
+            return $"Type={Type} ListId={Id} Size={Size} Count={Count} EmptySlots={emptySlots} " +
+                   $"ItemId={itemId} ReqAmount={amount} ExistingSlots={itemSlots.Count} " +
+                   $"StackableSlots={stackableSlots.Count} StackCapacity={stackCapacity} Bits={Bits}";
+        }
+
         public int InsertItem(ItemModel newItem)
         {
             var targetSlot = GetEmptySlot;
             newItem.Id = Items[targetSlot].Id;
             newItem.Slot = targetSlot;
+            newItem.ItemListId = Id;
+            newItem.ItemList = this;
 
             Items[targetSlot] = newItem;
 
@@ -368,20 +389,27 @@ namespace DigitalWorldOnline.Commons.Models.Base
             if (itemToAdd.Amount == 0 || itemToAdd.ItemId == 0)
                 return false;
 
-            var tempItem = (ItemModel)itemToAdd.Clone();
-
             var targetSlot = FindItemBySlot(slot);
-            targetSlot.ItemId = tempItem.ItemId;
-            targetSlot.Amount = tempItem.Amount;
-            targetSlot.Power = tempItem.Power;
-            targetSlot.RerollLeft = tempItem.RerollLeft;
-            targetSlot.FamilyType = tempItem.FamilyType;
-            targetSlot.Duration = tempItem.Duration;
-            targetSlot.EndDate = tempItem.EndDate;
-            targetSlot.FirstExpired = tempItem.FirstExpired;
-            targetSlot.AccessoryStatus = tempItem.AccessoryStatus;
-            targetSlot.SocketStatus = tempItem.SocketStatus;
-            targetSlot.ItemInfo = tempItem.ItemInfo;
+            if (targetSlot == null)
+                return false;
+
+            targetSlot.ItemId = itemToAdd.ItemId;
+            targetSlot.Amount = itemToAdd.Amount;
+            targetSlot.Power = itemToAdd.Power;
+            targetSlot.RerollLeft = itemToAdd.RerollLeft;
+            targetSlot.FamilyType = itemToAdd.FamilyType;
+            targetSlot.Duration = itemToAdd.Duration;
+            targetSlot.EndDate = itemToAdd.EndDate;
+            targetSlot.FirstExpired = itemToAdd.FirstExpired;
+            targetSlot.ItemInfo = itemToAdd.ItemInfo;
+            targetSlot.ItemListId = Id;
+            targetSlot.ItemList = this;
+            targetSlot.AccessoryStatus = itemToAdd.AccessoryStatus
+                .Select(status => new ItemAccessoryStatusModel(status.Slot) { Type = status.Type, Value = status.Value })
+                .ToList();
+            targetSlot.SocketStatus = itemToAdd.SocketStatus
+                .Select(status => new ItemSocketStatusModel(status.Slot) { Type = status.Type, AttributeId = status.AttributeId, Value = status.Value })
+                .ToList();
 
             return true;
         }
@@ -402,9 +430,7 @@ namespace DigitalWorldOnline.Commons.Models.Base
 
         private List<ItemModel> BackupOperation()
         {
-            var backup = new List<ItemModel>();
-            backup.AddRange(Items);
-            return backup;
+            return Items.Select(item => (ItemModel)item.Clone()).ToList();
         }
 
         private void RevertOperation(List<ItemModel> backup)
@@ -416,16 +442,19 @@ namespace DigitalWorldOnline.Commons.Models.Base
 
         private void AddNewSlots(ItemModel itemToAdd)
         {
-            while (itemToAdd.Amount > 0 && Count < Size)
+            var overlap = itemToAdd.ItemInfo?.Overlap > 0 ? itemToAdd.ItemInfo.Overlap : (short)1;
+            while (itemToAdd.Amount > 0)
             {
                 itemToAdd.Slot = GetEmptySlot;
+                if (itemToAdd.Slot < 0)
+                    break;
 
                 var newItem = (ItemModel)itemToAdd.Clone();
 
-                if (itemToAdd.Amount > itemToAdd.ItemInfo.Overlap)
+                if (itemToAdd.Amount > overlap)
                 {
-                    itemToAdd.ReduceAmount(itemToAdd.ItemInfo.Overlap);
-                    newItem.SetAmount(itemToAdd.ItemInfo.Overlap);
+                    itemToAdd.ReduceAmount(overlap);
+                    newItem.SetAmount(overlap);
                 }
                 else
                 {
@@ -487,52 +516,155 @@ namespace DigitalWorldOnline.Commons.Models.Base
 
         public bool MoveItem(short originSlot, short destinationSlot)
         {
+            return TryMoveWithinList(originSlot, destinationSlot);
+        }
+
+        public bool TryMoveWithinList(int originSlot, int destinationSlot)
+        {
             var originItem = FindItemBySlot(originSlot);
             var destinationItem = FindItemBySlot(destinationSlot);
 
-            if (originItem.ItemId == 0)
+            if (originItem == null || destinationItem == null || originItem.ItemId == 0 || originItem.Amount <= 0)
                 return false;
 
-            if (originItem.ItemId == destinationItem.ItemId)
+            if (originSlot == destinationSlot)
+                return true;
+
+            if (destinationItem.ItemId == originItem.ItemId && destinationItem.ItemId > 0)
             {
-                if (originItem.Amount + destinationItem.Amount > originItem.ItemInfo.Overlap)
-                {
-                    originItem.ReduceAmount(originItem.ItemInfo.Overlap - destinationItem.Amount);
-                    destinationItem.SetAmount(originItem.ItemInfo.Overlap);
-                }
-                else
-                {
-                    destinationItem.IncreaseAmount(originItem.Amount);
-                    originItem.SetAmount();
-                }
-            }
-            else
-            {
-                if (destinationItem.ItemId == 0)
-                {
-                    var tempItem = (ItemModel)originItem.Clone(destinationItem.Id);
-                    tempItem.Slot = destinationItem.Slot;
+                if (!TryMergeIntoDestination(originItem, destinationItem, originItem.Amount))
+                    return false;
 
-                    destinationItem = tempItem;
-                    originItem.SetItemId();
-                }
-                else
-                {
-                    var tempItem = (ItemModel)destinationItem.Clone(originItem.Id);
-                    tempItem.Slot = originItem.Slot;
-
-                    var tempItem2 = (ItemModel)originItem.Clone(destinationItem.Id);
-                    tempItem2.Slot = destinationItem.Slot;
-
-                    destinationItem = tempItem2;
-                    originItem = (ItemModel)tempItem.Clone(originItem.Id);
-                }
+                CheckEmptyItems();
+                return true;
             }
 
-            Items[originSlot] = originItem;
-            Items[destinationSlot] = destinationItem;
-
+            SwapSlotPayload(originItem, destinationItem);
+            CheckEmptyItems();
             return true;
+        }
+
+        public bool TryMoveAcrossLists(ItemListModel destinationList, int originSlot, int destinationSlot)
+        {
+            var originItem = FindItemBySlot(originSlot);
+            var destinationItem = destinationList.FindItemBySlot(destinationSlot);
+
+            if (originItem == null || destinationItem == null || originItem.ItemId == 0 || originItem.Amount <= 0)
+                return false;
+
+            if (destinationItem.ItemId == originItem.ItemId && destinationItem.ItemId > 0)
+            {
+                if (!TryMergeIntoDestination(originItem, destinationItem, originItem.Amount))
+                    return false;
+
+                CheckEmptyItems();
+                destinationList.CheckEmptyItems();
+                return true;
+            }
+
+            SwapSlotPayload(originItem, destinationItem);
+            CheckEmptyItems();
+            destinationList.CheckEmptyItems();
+            return true;
+        }
+
+        public bool TrySplitAcrossLists(ItemListModel destinationList, int originSlot, int destinationSlot, int splitAmount)
+        {
+            if (splitAmount <= 0)
+                return false;
+
+            var originItem = FindItemBySlot(originSlot);
+            var destinationItem = destinationList.FindItemBySlot(destinationSlot);
+
+            if (originItem == null || destinationItem == null || originItem.ItemId == 0 || originItem.Amount <= splitAmount)
+                return false;
+
+            if (destinationItem.ItemId != 0 && destinationItem.ItemId != originItem.ItemId)
+                return false;
+
+            if (destinationItem.ItemId == 0)
+            {
+                CopySlotPayload(destinationItem, originItem, splitAmount);
+                originItem.ReduceAmount(splitAmount);
+                CheckEmptyItems();
+                destinationList.CheckEmptyItems();
+                return true;
+            }
+
+            if (!destinationItem.CanIncrease(splitAmount))
+                return false;
+
+            destinationItem.IncreaseAmount(splitAmount);
+            originItem.ReduceAmount(splitAmount);
+            CheckEmptyItems();
+            destinationList.CheckEmptyItems();
+            return true;
+        }
+
+        private static bool TryMergeIntoDestination(ItemModel originItem, ItemModel destinationItem, int amountToMove)
+        {
+            var maxIncrease = destinationItem.GetMaxIncreaseCapacity();
+            if (maxIncrease <= 0)
+                return false;
+
+            var movedAmount = amountToMove > maxIncrease ? maxIncrease : amountToMove;
+            destinationItem.IncreaseAmount(movedAmount);
+            originItem.ReduceAmount(movedAmount);
+            return true;
+        }
+
+        private static void SwapSlotPayload(ItemModel firstSlot, ItemModel secondSlot)
+        {
+            var firstSnapshot = CreateSlotSnapshot(firstSlot);
+            var secondSnapshot = CreateSlotSnapshot(secondSlot);
+
+            ApplySlotSnapshot(firstSlot, secondSnapshot);
+            ApplySlotSnapshot(secondSlot, firstSnapshot);
+        }
+
+        private static ItemModel CreateSlotSnapshot(ItemModel source)
+        {
+            var snapshot = new ItemModel();
+            CopySlotPayload(snapshot, source, source.Amount);
+            return snapshot;
+        }
+
+        private static void ApplySlotSnapshot(ItemModel destination, ItemModel snapshot)
+        {
+            destination.SetItemId(snapshot.ItemId);
+            destination.SetAmount(snapshot.Amount);
+            destination.SetPower(snapshot.Power);
+            destination.SetReroll(snapshot.RerollLeft);
+            destination.SetFamilyType(snapshot.FamilyType);
+            destination.Duration = snapshot.Duration;
+            destination.EndDate = snapshot.EndDate;
+            destination.FirstExpired = snapshot.FirstExpired;
+            destination.SetItemInfo(snapshot.ItemInfo);
+            destination.AccessoryStatus = snapshot.AccessoryStatus
+                .Select(status => new ItemAccessoryStatusModel(status.Slot) { Type = status.Type, Value = status.Value })
+                .ToList();
+            destination.SocketStatus = snapshot.SocketStatus
+                .Select(status => new ItemSocketStatusModel(status.Slot) { Type = status.Type, AttributeId = status.AttributeId, Value = status.Value })
+                .ToList();
+        }
+
+        private static void CopySlotPayload(ItemModel destination, ItemModel source, int amount)
+        {
+            destination.SetItemId(source.ItemId);
+            destination.SetAmount(amount);
+            destination.SetPower(source.Power);
+            destination.SetReroll(source.RerollLeft);
+            destination.SetFamilyType(source.FamilyType);
+            destination.Duration = source.Duration;
+            destination.EndDate = source.EndDate;
+            destination.FirstExpired = source.FirstExpired;
+            destination.SetItemInfo(source.ItemInfo);
+            destination.AccessoryStatus = source.AccessoryStatus
+                .Select(status => new ItemAccessoryStatusModel(status.Slot) { Type = status.Type, Value = status.Value })
+                .ToList();
+            destination.SocketStatus = source.SocketStatus
+                .Select(status => new ItemSocketStatusModel(status.Slot) { Type = status.Type, AttributeId = status.AttributeId, Value = status.Value })
+                .ToList();
         }
 
         public void Clear()
@@ -680,6 +812,17 @@ namespace DigitalWorldOnline.Commons.Models.Base
 
         public void CheckEmptyItems()
         {
+            for (var slot = 0; slot < Size; slot++)
+            {
+                if (FindItemBySlot(slot) == null)
+                {
+                    Items.Add(new ItemModel(slot)
+                    {
+                        ItemListId = Id
+                    });
+                }
+            }
+
             Items.ForEach(item =>
             {
                 if (item.ItemId == 0 || item.Amount <= 0)

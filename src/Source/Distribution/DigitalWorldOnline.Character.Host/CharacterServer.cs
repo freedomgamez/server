@@ -104,7 +104,7 @@ namespace DigitalWorldOnline.Character
             try
             {
                 _logger.Debug($"Received {data.Length} bytes from {gameClientEvent.Client.ClientAddress}.");
-                _processor.ProcessPacketAsync(gameClientEvent.Client, data);
+                _processor.ProcessPacketAsync(gameClientEvent.Client, data).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {

@@ -230,6 +230,9 @@ namespace DigitalWorldOnline.Commons.Models.Character
         public bool TradeConfirm = false; //Criar Model para Trade TradeModel (Trade Inventory e Propriedades)
 
         public ItemListModel TradeInventory { get; private set; }
+        public Dictionary<int, int> TradeReservedItems { get; private set; } = new();
+        public Dictionary<int, int> TradeSlotSourceMap { get; private set; } = new();
+        public long TradeReservedBits { get; private set; }
 
         public ConditionEnum CurrentCondition { get; private set; }
         public ConditionEnum PreviousCondition { get; private set; }
@@ -345,6 +348,9 @@ namespace DigitalWorldOnline.Commons.Models.Character
             TargetTradeGeneralHandle = targetTradeGeneralHandler;
             TradeCondition = Condition;
             TradeInventory = new ItemListModel(ItemListEnum.TradeItems);
+            TradeReservedItems = new Dictionary<int, int>();
+            TradeSlotSourceMap = new Dictionary<int, int>();
+            TradeReservedBits = 0;
         }
         public void SetTradeConfirm(bool confirm)
         {
@@ -357,7 +363,64 @@ namespace DigitalWorldOnline.Commons.Models.Character
             TargetTradeGeneralHandle = 0;
             TradeConfirm = false;
             TradeInventory = null;
+            TradeReservedItems = new Dictionary<int, int>();
+            TradeSlotSourceMap = new Dictionary<int, int>();
+            TradeReservedBits = 0;
 
+        }
+
+        public int GetReservedAmount(int inventorySlot)
+        {
+            return TradeReservedItems.TryGetValue(inventorySlot, out var reservedAmount) ? reservedAmount : 0;
+        }
+
+        public bool ReserveTradeItem(int inventorySlot, int amount)
+        {
+            if (amount <= 0)
+                return false;
+
+            var sourceItem = Inventory.FindItemBySlot(inventorySlot);
+            if (sourceItem == null || sourceItem.ItemId == 0 || sourceItem.Amount <= 0)
+                return false;
+
+            var reservedAmount = GetReservedAmount(inventorySlot);
+            if (reservedAmount + amount > sourceItem.Amount)
+                return false;
+
+            TradeReservedItems[inventorySlot] = reservedAmount + amount;
+            return true;
+        }
+
+        public void RemoveReservedTradeItem(int inventorySlot, int amount)
+        {
+            if (!TradeReservedItems.TryGetValue(inventorySlot, out var reservedAmount))
+                return;
+
+            reservedAmount -= amount;
+            if (reservedAmount <= 0)
+                TradeReservedItems.Remove(inventorySlot);
+            else
+                TradeReservedItems[inventorySlot] = reservedAmount;
+        }
+
+        public void MapTradeSlotSource(int tradeSlot, int inventorySlot) => TradeSlotSourceMap[tradeSlot] = inventorySlot;
+
+        public bool TryGetTradeSlotSource(int tradeSlot, out int inventorySlot) => TradeSlotSourceMap.TryGetValue(tradeSlot, out inventorySlot);
+
+        public void RemoveTradeSlotSource(int tradeSlot) => TradeSlotSourceMap.Remove(tradeSlot);
+        public void ReplaceTradeSlotSourceMap(Dictionary<int, int> tradeSlotSourceMap) => TradeSlotSourceMap = tradeSlotSourceMap;
+
+        public bool ReserveTradeBits(long bits)
+        {
+            if (bits < 0)
+                return false;
+
+            var availableBits = Inventory.Bits - TradeReservedBits;
+            if (bits > availableBits)
+                return false;
+
+            TradeReservedBits = bits;
+            return true;
         }
     
     }

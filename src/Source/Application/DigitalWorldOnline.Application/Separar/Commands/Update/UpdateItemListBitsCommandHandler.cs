@@ -1,20 +1,20 @@
-﻿using DigitalWorldOnline.Commons.Interfaces;
+﻿using DigitalWorldOnline.Application.Services;
 using MediatR;
 
 namespace DigitalWorldOnline.Application.Separar.Commands.Update
 {
     public class UpdateItemListBitsCommandHandler : IRequestHandler<UpdateItemListBitsCommand>
     {
-        private readonly ICharacterCommandsRepository _repository;
+        private readonly StoragePersistenceDualWriteCoordinator _dualWriteCoordinator;
 
-        public UpdateItemListBitsCommandHandler(ICharacterCommandsRepository repository)
+        public UpdateItemListBitsCommandHandler(StoragePersistenceDualWriteCoordinator dualWriteCoordinator)
         {
-            _repository = repository;
+            _dualWriteCoordinator = dualWriteCoordinator;
         }
 
         public async Task<Unit> Handle(UpdateItemListBitsCommand request, CancellationToken cancellationToken)
         {
-            await _repository.UpdateItemListBitsAsync(request.ItemListId, request.Bits);
+            await _dualWriteCoordinator.UpdateItemListBitsAsync(request.ItemListId, request.Bits);
 
             return Unit.Value;
         }

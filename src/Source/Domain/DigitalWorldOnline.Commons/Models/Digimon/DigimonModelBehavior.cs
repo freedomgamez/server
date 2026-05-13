@@ -108,7 +108,7 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
             {
                 var totalFs =
                     Friendship +
-                    (Character?.EquipmentAttribute(Friendship, SkillCodeApplyAttributeEnum.FS) ?? 0) +
+                    (Character?.EquipmentAttributeForPartner(Friendship, SkillCodeApplyAttributeEnum.FS) ?? 0) +
                     Character?.BuffAttribute(Friendship, SkillCodeApplyAttributeEnum.FS)+
                     BuffAttribute(Friendship, SkillCodeApplyAttributeEnum.FS);
 
@@ -119,8 +119,9 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
         public int AS =>
             _baseAs -
             GetSealStatus(StatusTypeEnum.AS) -
-            (Character?.EquipmentAttribute(_baseAs, SkillCodeApplyAttributeEnum.AS) ?? 0) -
+            (Character?.EquipmentAttributeForPartner(_baseAs, SkillCodeApplyAttributeEnum.AS) ?? 0) -
             (Character?.AccessoryStatus(AccessoryStatusTypeEnum.AS, _baseAs) ?? 0) -
+            (Character?.ChipsetStatus(AccessoryStatusTypeEnum.AS, _baseAs) ?? 0) -
             BuffAttribute(_baseAs, SkillCodeApplyAttributeEnum.AS);
 
         public short AR => (short)_baseAr;
@@ -152,17 +153,18 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
             }
         }
 
-        public short BL => (short)
-            (_baseBl +
+        public short BL => ClampToShort(
+            _baseBl +
             (Digiclone.BLValue) +
             GetSealStatus(StatusTypeEnum.BL) +
             (Character?.AccessoryStatus(AccessoryStatusTypeEnum.BL) ?? 0) +
+            (Character?.ChipsetStatus(AccessoryStatusTypeEnum.BL) ?? 0) +
             BuffAttribute(_baseBl, SkillCodeApplyAttributeEnum.BL));
 
-        public short CC => (short)
-            (_baseCc +
+        public short CC => ClampToShort(
+            _baseCc +
             (_baseCc * Digiclone.CTValue / 100) +
-            (Character?.EquipmentAttribute(_baseCc, SkillCodeApplyAttributeEnum.CA) ?? 0) +
+            (Character?.EquipmentAttributeForPartner(_baseCc, SkillCodeApplyAttributeEnum.CA) ?? 0) +
             GetSealStatus(StatusTypeEnum.CT) +
             GetTitleStatus(StatusTypeEnum.CT) +
             (Character?.AccessoryStatus(AccessoryStatusTypeEnum.CT, _baseCc) ?? 0) +
@@ -176,8 +178,17 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
 
         public int ATT =>
            _baseAtt +
-           Character?.EquipmentAttribute(_baseAtt, SkillCodeApplyAttributeEnum.ATTRIBUTE) ?? 0 +
+           (Character?.EquipmentAttributeForPartner(_baseAtt, SkillCodeApplyAttributeEnum.ATTRIBUTE) ?? 0) +
            (Character?.AccessoryStatus(AccessoryStatusTypeEnum.ATT) ?? 0);
+
+        /// <summary>
+        /// Accessory-driven skill damage bonus (percentage points).
+        /// CT/EV are basis-point tracks; ATT follows client percent semantics.
+        /// </summary>
+        public int SkillDamagePercent =>
+            (Character?.AccessoryStatus(AccessoryStatusTypeEnum.ATT) ?? 0) +
+            (Character?.ChipsetStatus(AccessoryStatusTypeEnum.ATT) ?? 0) +
+            BuffAttribute(0, SkillCodeApplyAttributeEnum.SkillDamageByAttribute);
 
         public short DE => (short)
             (_baseDe +
@@ -197,8 +208,8 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
             (Character?.ChipsetStatus(AccessoryStatusTypeEnum.DS) ?? 0) +
             BuffAttribute(_baseDs, SkillCodeApplyAttributeEnum.MaxDS, SkillCodeApplyAttributeEnum.DS);
 
-        public short EV => (short)
-            (_baseEv +
+        public short EV => ClampToShort(
+            _baseEv +
             (_baseEv * Digiclone.EVValue / 100) +
             GetSealStatus(StatusTypeEnum.EV) +
             GetTitleStatus(StatusTypeEnum.EV) +
@@ -206,8 +217,8 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
             (Character?.ChipsetStatus(AccessoryStatusTypeEnum.EV) ?? 0) +
             BuffAttribute(_baseEv, SkillCodeApplyAttributeEnum.EV, SkillCodeApplyAttributeEnum.ER)); //100 = 1%
 
-        public short HT => (short)
-            (_baseHt +
+        public short HT => ClampToShort(
+            _baseHt +
             GetSealStatus(StatusTypeEnum.HT) +
             GetTitleStatus(StatusTypeEnum.HT) +
             (Character?.AccessoryStatus(AccessoryStatusTypeEnum.HT) ?? 0) +
@@ -249,6 +260,17 @@ namespace DigitalWorldOnline.Commons.Models.Digimon
             BuffAttribute(_baseHp, SkillCodeApplyAttributeEnum.MaxHP);
 
         public int MS => _fsMs;
+
+        private static short ClampToShort(int value)
+        {
+            if (value > short.MaxValue)
+                return short.MaxValue;
+
+            if (value < short.MinValue)
+                return short.MinValue;
+
+            return (short)value;
+        }
 
         /// <summary>
         /// Returns the current evolution of the partner.

@@ -1,21 +1,27 @@
-﻿using DigitalWorldOnline.Commons.DTOs.Assets;
-using DigitalWorldOnline.Commons.Interfaces;
+﻿using DigitalWorldOnline.Application.GameAssets.Bins;
+using DigitalWorldOnline.Commons.DTOs.Assets;
 using MediatR;
 
 namespace DigitalWorldOnline.Application.GameAssets.Queries
 {
     public class ItemAssetsQueryHandler : IRequestHandler<ItemAssetsQuery, List<ItemAssetDTO>>
     {
-        private readonly IServerQueriesRepository _repository;
+        private readonly ItemListBinLoader _itemListBinLoader;
 
-        public ItemAssetsQueryHandler(IServerQueriesRepository repository)
+        public ItemAssetsQueryHandler(ItemListBinLoader itemListBinLoader)
         {
-            _repository = repository;
+            _itemListBinLoader = itemListBinLoader;
         }
 
         public async Task<List<ItemAssetDTO>> Handle(ItemAssetsQuery request, CancellationToken cancellationToken)
         {
-            return await _repository.GetItemAssetsAsync();
+            var data = _itemListBinLoader.Load();
+            long id = 1;
+            foreach (var item in data.Items)
+            {
+                item.Id = id++;
+            }
+            return await Task.FromResult(data.Items.ToList());
         }
     }
 }

@@ -96,12 +96,6 @@ namespace DigitalWorldOnline.Infraestructure.ContextConfiguration.Account
                 .IsRequired();
 
             builder
-                .HasMany(c => c.ItemList)
-                .WithOne()
-                .HasForeignKey("AccountId")
-                .OnDelete(DeleteBehavior.Cascade);
-
-            builder
                 .HasOne(x => x.SystemInformation)
                 .WithOne(x => x.Account)
                 .HasForeignKey<SystemInformationDTO>(x => x.AccountId);

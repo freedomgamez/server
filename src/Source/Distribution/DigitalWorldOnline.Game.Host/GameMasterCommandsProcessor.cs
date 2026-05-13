@@ -17,6 +17,7 @@ using DigitalWorldOnline.Commons.Packets.MapServer;
 using DigitalWorldOnline.Commons.Utils;
 using DigitalWorldOnline.Commons.Writers;
 using DigitalWorldOnline.Game.Managers;
+using DigitalWorldOnline.Game.Services;
 using DigitalWorldOnline.GameHost;
 using MediatR;
 using Microsoft.Extensions.Configuration;
@@ -42,6 +43,7 @@ namespace DigitalWorldOnline.Game
         private readonly ILogger _logger;
         private readonly ISender _sender;
         private readonly IConfiguration _configuration;
+        private readonly OwnerStorageFlushService _ownerStorageFlushService;
 
         public GameMasterCommandsProcessor(
             PartyManager partyManager,
@@ -54,7 +56,8 @@ namespace DigitalWorldOnline.Game
             MapRegistry registry,
             ILogger logger,
             ISender sender,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            OwnerStorageFlushService ownerStorageFlushService)
         {
             _partyManager = partyManager;
             _expManager = expManager;
@@ -67,6 +70,7 @@ namespace DigitalWorldOnline.Game
             _logger = logger;
             _sender = sender;
             _configuration = configuration;
+            _ownerStorageFlushService = ownerStorageFlushService;
         }
 
         public async Task ExecuteCommand(GameClient client, string message)
@@ -900,6 +904,7 @@ namespace DigitalWorldOnline.Game
                             break;
                         }
 
+                        await _ownerStorageFlushService.FlushForTransitionAsync(client);
                         if (client.PvpMap)
                             _pvpServer.RemoveClient(client);
                         else if (client.DungeonMap)
@@ -1009,6 +1014,7 @@ namespace DigitalWorldOnline.Game
                         client.Tamer.UpdateState(CharacterStateEnum.Loading);
                         await _sender.Send(new UpdateCharacterStateCommand(client.TamerId, CharacterStateEnum.Loading));
 
+                        await _ownerStorageFlushService.FlushForTransitionAsync(client);
                         _mapServer.RemoveClient(client);
 
                         client.SetGameQuit(false);
@@ -1051,7 +1057,6 @@ namespace DigitalWorldOnline.Game
                         if (newItem.IsTemporary)
                             newItem.SetRemainingTime((uint)newItem.ItemInfo.UsageTimeMinutes);
 
-                        var itemClone = (ItemModel)newItem.Clone();
                         if (client.Tamer.Inventory.AddItem(newItem))
                         {
                             client.Send(new ReceiveItemPacket(newItem, InventoryTypeEnum.Inventory));
@@ -1061,6 +1066,78 @@ namespace DigitalWorldOnline.Game
                         {
                             client.Send(new PickItemFailPacket(PickItemFailReasonEnum.InventoryFull));
                         }
+                    }
+                    break;
+
+                case "stattest":
+                    {
+                        var regex = @"(stattest\sapply$){1}";
+                        var match = Regex.Match(message, regex, RegexOptions.IgnoreCase);
+
+                        if (!match.Success)
+                        {
+                            client.Send(new SystemMessagePacket($"Unknown command. Check the available commands on the Admin Portal."));
+                            break;
+                        }
+
+                        var candidateLists = new[]
+                        {
+                            client.Tamer.Equipment,
+                            client.Tamer.Digivice,
+                            client.Tamer.ChipSets
+                        };
+
+                        var updatedItems = 0;
+                        var updatedStatuses = 0;
+
+                        foreach (var list in candidateLists)
+                        {
+                            foreach (var item in list.Items.Where(x => x != null && x.ItemId > 0))
+                            {
+                                item.SetItemInfo(item.ItemInfo ?? _assets.ItemInfo.FirstOrDefault(x => x.ItemId == item.ItemId));
+                                var accessoryAsset = _assets.AccessoryRoll.FirstOrDefault(x => x.ItemId == item.ItemInfo?.Type)
+                                    ?? _assets.AccessoryRoll.FirstOrDefault(x => x.ItemId == item.ItemId);
+
+                                if (accessoryAsset == null)
+                                    continue;
+
+                                var touchedItem = false;
+
+                                foreach (var status in item.AccessoryStatus.Where(x => x.Value > 0))
+                                {
+                                    var maxValue = accessoryAsset.Status
+                                        .Where(x => x.Type == (int)status.Type)
+                                        .Select(x => x.MaxValue)
+                                        .DefaultIfEmpty(status.Value)
+                                        .Max();
+
+                                    if (status.Value != maxValue)
+                                    {
+                                        status.SetValue((short)maxValue);
+                                        updatedStatuses++;
+                                        touchedItem = true;
+                                    }
+                                }
+
+                                if (!touchedItem)
+                                    continue;
+
+                                item.SetPower(102);
+                                await _sender.Send(new UpdateItemAccessoryStatusCommand(item));
+                                updatedItems++;
+                            }
+                        }
+
+                        client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
+                        client.Send(new UpdateStatusPacket(client.Tamer));
+
+                        client.Send(new SystemMessagePacket($"Stat test apply done. Items={updatedItems}, Statuses={updatedStatuses}."));
+                        _logger.Information(
+                            "GM !stattest apply: tamer={TamerId} account={AccountId} updatedItems={UpdatedItems} updatedStatuses={UpdatedStatuses}",
+                            client.TamerId,
+                            client.AccountId,
+                            updatedItems,
+                            updatedStatuses);
                     }
                     break;
 
@@ -1254,6 +1331,7 @@ namespace DigitalWorldOnline.Game
                         client.Tamer.UpdateState(CharacterStateEnum.Loading);
                         await _sender.Send(new UpdateCharacterStateCommand(client.TamerId, CharacterStateEnum.Loading));
 
+                        await _ownerStorageFlushService.FlushForTransitionAsync(client);
                         _mapServer.RemoveClient(client);
 
                         client.SetGameQuit(false);
@@ -1284,6 +1362,7 @@ namespace DigitalWorldOnline.Game
                         client.Tamer.UpdateState(CharacterStateEnum.Loading);
                         await _sender.Send(new UpdateCharacterStateCommand(client.TamerId, CharacterStateEnum.Loading));
 
+                        await _ownerStorageFlushService.FlushForTransitionAsync(client);
                         _mapServer.RemoveClient(client);
 
                         client.SetGameQuit(false);
@@ -1318,6 +1397,7 @@ namespace DigitalWorldOnline.Game
                                     client.Send(new MembershipPacket(client.MembershipExpirationDate!.Value, client.MembershipUtcSeconds));
 
                                     await _sender.Send(new UpdateAccountMembershipCommand(client.AccountId, client.MembershipExpirationDate));
+                                    await _ownerStorageFlushService.FlushForTransitionAsync(client);
                                     _mapServer.RemoveClient(client);
                                     client.SetGameQuit(false);
                                     client.Send(new MapSwapPacket(

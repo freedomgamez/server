@@ -7,7 +7,10 @@ using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Models.Base;
+using DigitalWorldOnline.Commons.Packets.Chat;
 using DigitalWorldOnline.Commons.Packets.GameServer;
+using DigitalWorldOnline.Commons.Packets.Items;
+using DigitalWorldOnline.Commons.Utils;
 using DigitalWorldOnline.GameHost;
 using MediatR;
 using Serilog;
@@ -35,22 +38,62 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var packet = new GamePacketReader(packetData);
 
             _ = packet.ReadInt();
-            var vipEnabled = packet.ReadByte();
-            int npcId = packet.ReadInt();
-            short sourceSlot = packet.ReadShort();
-            short destinationSlot = packet.ReadShort();
+            int remaining = (packet.Length - 2) - (int)packet.Packet.Position;
+            short sourceSlot;
+            short destinationSlot;
+
+            if (remaining == 9)
+            {
+                _ = packet.ReadInt(); // npcId
+                sourceSlot = packet.ReadShort();
+                destinationSlot = packet.ReadShort();
+                _ = packet.ReadByte(); // socketOrder
+            }
+            else if (remaining == 10)
+            {
+                _ = packet.ReadByte(); // vip
+                _ = packet.ReadInt();  // npcId
+                sourceSlot = packet.ReadShort();
+                destinationSlot = packet.ReadShort();
+                _ = packet.ReadByte(); // socketOrder
+            }
+            else if (remaining == 13)
+            {
+                _ = packet.ReadInt();  // portableSlot
+                _ = packet.ReadInt();  // npcId
+                sourceSlot = packet.ReadShort();
+                destinationSlot = packet.ReadShort();
+                _ = packet.ReadByte(); // socketOrder
+            }
+            else
+            {
+                _ = packet.ReadByte(); // vip
+                _ = packet.ReadInt();  // portableSlot
+                _ = packet.ReadInt();  // npcId
+                sourceSlot = packet.ReadShort();
+                destinationSlot = packet.ReadShort();
+                _ = packet.ReadByte(); // socketOrder
+            }
 
             var itemInfo = client.Tamer.Inventory.FindItemBySlot(sourceSlot);
             var destinationInfo = client.Tamer.Inventory.FindItemBySlot(destinationSlot);
 
             if (itemInfo != null && destinationInfo != null)
             {
-                var avaliableSocket = destinationInfo.SocketStatus.First(x => x.AttributeId == 0);
-                var avaliableStatus = destinationInfo.AccessoryStatus.First(x => x.Value == 0);
+                var avaliableSocket = destinationInfo.SocketStatus.FirstOrDefault(x => x.AttributeId == 0);
+                var avaliableStatus = destinationInfo.AccessoryStatus.FirstOrDefault(x => x.Value == 0);
 
-                if (avaliableSocket != null)
+                if (avaliableSocket != null && avaliableStatus != null)
                 {
-                    var attributeApply = itemInfo.AccessoryStatus.First(x => x.Value > 0);
+                    var attributeApply = itemInfo.AccessoryStatus.FirstOrDefault(x => x.Value > 0);
+                    if (attributeApply == null)
+                    {
+                        client.Send(UtilitiesFunctions.GroupPackets(
+                            new ItemSocketInPacket((int)client.Tamer.Inventory.Bits).Serialize(),
+                            new SystemMessagePacket("Invalid source socket item.").Serialize(),
+                            new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()));
+                        return;
+                    }
 
                     destinationInfo.SetPower(itemInfo.Power);
                     destinationInfo.SetReroll(0);
@@ -64,12 +107,21 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 client.Tamer.Inventory.RemoveOrReduceItem(itemInfo, 1, sourceSlot);
                 client.Tamer.Inventory.RemoveBits(itemInfo.ItemInfo.ScanPrice / 2);
 
-                client.Send(new ItemSocketInPacket((int)client.Tamer.Inventory.Bits));
+                client.Send(UtilitiesFunctions.GroupPackets(
+                    new ItemSocketInPacket((int)client.Tamer.Inventory.Bits).Serialize(),
+                    new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()));
 
                 await _sender.Send(new UpdateItemSocketStatusCommand(destinationInfo));
                 await _sender.Send(new UpdateItemAccessoryStatusCommand(destinationInfo));
                 await _sender.Send(new UpdateItemsCommand(client.Tamer.Inventory));
                 await _sender.Send(new UpdateItemListBitsCommand(client.Tamer.Inventory));
+            }
+            else
+            {
+                client.Send(UtilitiesFunctions.GroupPackets(
+                    new ItemSocketInPacket((int)client.Tamer.Inventory.Bits).Serialize(),
+                    new PickItemFailPacket(PickItemFailReasonEnum.InventoryFull).Serialize(),
+                    new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()));
             }
 
         }

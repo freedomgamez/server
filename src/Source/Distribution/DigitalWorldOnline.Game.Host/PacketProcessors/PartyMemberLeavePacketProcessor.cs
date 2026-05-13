@@ -10,6 +10,7 @@ using DigitalWorldOnline.Commons.Packets.GameServer;
 using DigitalWorldOnline.Commons.Packets.MapServer;
 using DigitalWorldOnline.Commons.Utils;
 using DigitalWorldOnline.Game.Managers;
+using DigitalWorldOnline.Game.Services;
 using DigitalWorldOnline.GameHost;
 using MediatR;
 using Microsoft.Extensions.Configuration;
@@ -21,7 +22,6 @@ namespace DigitalWorldOnline.Game.PacketProcessors
     {
         public GameServerPacketEnum Type => GameServerPacketEnum.PartyMemberLeave;
 
-        private const string GameServerAddress = "GameServer:Address";
         private const string GamerServerPublic = "GameServer:PublicAddress";
         private const string GameServerPort = "GameServer:Port";
 
@@ -32,6 +32,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
         private readonly ILogger _logger;
         private readonly ISender _sender;
         private readonly IConfiguration _configuration;
+        private readonly OwnerStorageFlushService _ownerStorageFlushService;
         
         public PartyMemberLeavePacketProcessor(
              PartyManager partyManager,
@@ -39,7 +40,8 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             ILogger logger,
             ISender sender,
             IConfiguration configuration,
-            DungeonsServer dungeonServer)
+            DungeonsServer dungeonServer,
+            OwnerStorageFlushService ownerStorageFlushService)
         {
             _partyManager = partyManager;
             _mapServer = mapServer;
@@ -47,6 +49,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             _sender = sender;
             _configuration = configuration;
             _dungeonServer = dungeonServer;
+            _ownerStorageFlushService = ownerStorageFlushService;
         }
         public async Task Process(GameClient client, byte[] packetData)
         {
@@ -85,6 +88,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             continue;
                         }
 
+                        await _ownerStorageFlushService.FlushForTransitionAsync(dungeonClient);
                         _dungeonServer.RemoveClient(dungeonClient);
 
                         dungeonClient.Tamer.NewLocation(map, destination.X, destination.Y);

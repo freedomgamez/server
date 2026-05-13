@@ -146,7 +146,7 @@ namespace DigitalWorldOnline.GameHost
 
             foreach (var map in Maps.Where(x => x.Initialized).ToList())
             {
-                var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(map.Id), cancellationToken));
+                var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(map.MapId), cancellationToken));
 
                 if(mapMobs != null)
                 {
@@ -173,7 +173,7 @@ namespace DigitalWorldOnline.GameHost
 
             foreach (var map in Maps.Where(x => x.Initialized))
             {
-                var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(map.Id)));
+                var mapMobs = _mapper.Map<IList<MobConfigModel>>(await _sender.Send(new MapMobConfigsQuery(map.MapId)));
 
                 if (mapMobs != null)
                 {

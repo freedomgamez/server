@@ -92,6 +92,7 @@ namespace DigitalWorldOnline.Account
 
                         client.SetAccountId(account.Id);
                         client.SetAccessLevel(account.AccessLevel);
+                        client.SetAccountSecondaryPassword(account.SecondaryPassword);
 
                         if (account.AccountBlock != null)
                         {
@@ -179,50 +180,23 @@ namespace DigitalWorldOnline.Account
                         DebugLog("Reading packet first part parameters...");
                         var needToCheck = packet.ReadShort() == SecondaryPasswordCheckEnum.Check.GetHashCode();
 
-                        DebugLog($"Searching account with id {client.AccountId}...");
-                        var account = await _sender.Send(new AccountByIdQuery(client.AccountId));
-
-                        if (account == null)
-                            throw new KeyNotFoundException(nameof(account));
-
                         if (needToCheck)
                         {
                             DebugLog("Reading packet second part parameters...");
                             var securitycode = packet.ReadZString();
 
-                            if (account.SecondaryPassword == securitycode)
+                            if (client.AccountSecondaryPassword == securitycode)
                             {
-                                DebugLog("Saving login try for skipping secondary password...");
-                                await _sender.Send(
-                                    new CreateLoginTryCommand(
-                                        account.Username, 
-                                        client.ClientAddress, 
-                                        LoginTryResultEnum.Success
-                                    )
-                                );
-
                                 client.Send(
                                     new SecondaryPasswordCheckResultPacket(SecondaryPasswordCheckEnum.CorrectOrSkipped));
                             }
                             else
                             {
-                                DebugLog("Saving login try for skipping secondary password...");
-                                await _sender.Send(
-                                    new CreateLoginTryCommand(
-                                        account.Username, 
-                                        client.ClientAddress, 
-                                        LoginTryResultEnum.IncorrectSecondaryPassword
-                                    )
-                                );
-
                                 client.Send(new SecondaryPasswordCheckResultPacket(SecondaryPasswordCheckEnum.Incorrect));
                             }
                         }
                         else
                         {
-                            DebugLog("Saving login try for skipping secondary password...");
-                            await _sender.Send(new CreateLoginTryCommand(account.Username, client.ClientAddress, LoginTryResultEnum.Success));
-
                             DebugLog($"Sending answer for skipped secondary password check...");
                             client.Send(new SecondaryPasswordCheckResultPacket(SecondaryPasswordCheckEnum.CorrectOrSkipped).Serialize());
                         }
@@ -237,17 +211,13 @@ namespace DigitalWorldOnline.Account
 
                         DebugLog($"{currentSecurityCode} {newSecurityCode}");
 
-                        var account = await _sender.Send(new AccountByIdQuery(client.AccountId));
-
-                        if (account == null)
-                            throw new KeyNotFoundException(nameof(account));
-
                         DebugLog($"Checking secondary password...");
 
-                        if (account.SecondaryPassword == currentSecurityCode)
+                        if (client.AccountSecondaryPassword == currentSecurityCode)
                         {
                             DebugLog($"Saving new secondary password...");
                             await _sender.Send(new CreateOrUpdateSecondaryPasswordCommand(client.AccountId, newSecurityCode));
+                            client.SetAccountSecondaryPassword(newSecurityCode);
 
                             DebugLog($"Sending answer for correct secondary password check...");
                             client.Send(new SecondaryPasswordChangeResultPacket(SecondaryPasswordChangeEnum.Changed).Serialize());

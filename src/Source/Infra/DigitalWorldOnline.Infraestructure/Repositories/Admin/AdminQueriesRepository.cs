@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Application.Admin.Queries;
 using DigitalWorldOnline.Application.Admin.Repositories;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Commons.DTOs.Assets;
 using DigitalWorldOnline.Commons.Enums.Admin;
 using Microsoft.EntityFrameworkCore;
@@ -10,10 +11,14 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Admin
     public class AdminQueriesRepository : IAdminQueriesRepository
     {
         private readonly DatabaseContext _context;
+        private readonly MapBinLoader _mapBin;
 
-        public AdminQueriesRepository(DatabaseContext context)
+        public AdminQueriesRepository(
+            DatabaseContext context,
+            MapBinLoader mapBin)
         {
             _context = context;
+            _mapBin = mapBin;
         }
 
         public async Task<GetAccountByIdQueryDto> GetAccountByIdAsync(long id)
@@ -431,6 +436,7 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Admin
         public async Task<GetSpawnPointsQueryDto> GetSpawnPointsAssetAsync(int mapId, int limit, int offset, string sortColumn, SortDirectionEnum sortDirection)
         {
             var result = new GetSpawnPointsQueryDto();
+            EnsureMapBinLoaded();
 
             if (string.IsNullOrEmpty(sortColumn))
                 sortColumn = "Id";
@@ -438,23 +444,30 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Admin
             if (sortDirection == SortDirectionEnum.None)
                 sortDirection = SortDirectionEnum.Asc;
 
-            var dto = await _context.MapRegionListAsset
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.MapId == mapId);
-
-            if (dto != null)
+            if (_mapBin.IsLoaded && _mapBin.Data.RegionsByMapId.TryGetValue(mapId, out var regions))
             {
-                result.TotalRegisters = await _context.MapRegionAsset
-                    .AsNoTracking()
-                    .CountAsync(x => x.MapRegionListId == dto.Id);
+                var projected = new List<MapRegionAssetDTO>(regions.Count);
+                for (int index = 0; index < regions.Count; index++)
+                {
+                    var region = regions[index];
+                    projected.Add(new MapRegionAssetDTO
+                    {
+                        Id = ComposeSpawnPointId(mapId, index),
+                        Index = (byte)index,
+                        X = region.CenterX,
+                        Y = region.CenterY,
+                        Name = $"Map {mapId} Region {index + 1}",
+                        MapRegionListId = mapId
+                    });
+                }
 
-                result.Registers = await _context.MapRegionAsset
-                    .AsNoTracking()
-                    .Where(x => x.MapRegionListId == dto.Id)
+                result.TotalRegisters = projected.Count;
+                result.Registers = projected
+                    .AsQueryable()
+                    .OrderBy($"{sortColumn} {sortDirection}")
                     .Skip(offset)
                     .Take(limit)
-                    .OrderBy($"{sortColumn} {sortDirection}")
-                    .ToListAsync();
+                    .ToList();
             }
             else
             {
@@ -468,21 +481,47 @@ namespace DigitalWorldOnline.Infraestructure.Repositories.Admin
         public async Task<GetSpawnPointByIdQueryDto> GetSpawnPointByIdAsync(long id)
         {
             var result = new GetSpawnPointByIdQueryDto();
+            EnsureMapBinLoaded();
 
-            var dto = await _context.MapRegionAsset
-               .AsNoTracking()
-               .Include(x => x.MapRegionList)
-               .SingleOrDefaultAsync(x => x.Id == id);
-
-            if (dto != null)
+            if (_mapBin.IsLoaded && TrySplitSpawnPointId(id, out int mapId, out int regionIndex))
             {
-                result.Register = dto;
-                var mapDto = await _context.MapConfig.SingleAsync(x => x.MapId == dto.MapRegionList.MapId);
-                result.MapId = mapDto.Id;
-                result.MapName = mapDto.Name;
+                if (_mapBin.Data.RegionsByMapId.TryGetValue(mapId, out var regions) &&
+                    regionIndex >= 0 &&
+                    regionIndex < regions.Count)
+                {
+                    var region = regions[regionIndex];
+                    result.Register = new MapRegionAssetDTO
+                    {
+                        Id = id,
+                        Index = (byte)regionIndex,
+                        X = region.CenterX,
+                        Y = region.CenterY,
+                        Name = $"Map {mapId} Region {regionIndex + 1}",
+                        MapRegionListId = mapId
+                    };
+                    result.MapId = mapId;
+                    result.MapName = $"Map {mapId}";
+                }
             }
 
-            return result;
+            return await Task.FromResult(result);
+        }
+
+        private static long ComposeSpawnPointId(int mapId, int regionIndex) =>
+            ((long)mapId * 10000L) + (regionIndex + 1);
+
+        private static bool TrySplitSpawnPointId(long id, out int mapId, out int regionIndex)
+        {
+            mapId = (int)(id / 10000L);
+            var slot = (int)(id % 10000L);
+            regionIndex = slot - 1;
+            return mapId > 0 && regionIndex >= 0;
+        }
+
+        private void EnsureMapBinLoaded()
+        {
+            if (!_mapBin.IsLoaded)
+                _mapBin.Load();
         }
 
         public async Task<GetScansQueryDto> GetScansAsync(int limit, int offset, string sortColumn, SortDirectionEnum sortDirection, string? filter)

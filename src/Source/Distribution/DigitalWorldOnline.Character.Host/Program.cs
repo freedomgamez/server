@@ -51,8 +51,14 @@ namespace DigitalWorldOnline.Character
             var host = Host.CreateDefaultBuilder(args)
                 .UseSerilog()
                 .UseEnvironment("Development")
+                .UseDefaultServiceProvider((_, options) =>
+                {
+                    options.ValidateOnBuild = false;
+                })
                 .ConfigureServices((context, services) =>
                 {
+                    services.AddScoped<StoragePersistenceDualWriteCoordinator>();
+
                     services.AddDsoDatabase(context.Configuration);
 
                     services.AddScoped<IAdminQueriesRepository, AdminQueriesRepository>();

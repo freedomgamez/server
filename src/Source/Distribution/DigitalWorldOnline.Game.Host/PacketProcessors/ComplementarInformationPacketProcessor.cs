@@ -11,6 +11,7 @@ using DigitalWorldOnline.Commons.Enums.ClientEnums;
 using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Extensions;
 using DigitalWorldOnline.Commons.Interfaces;
+using DigitalWorldOnline.Commons.Models.Base;
 using DigitalWorldOnline.Commons.Models.Character;
 using DigitalWorldOnline.Commons.Models.Config;
 using DigitalWorldOnline.Commons.Models.Events;
@@ -27,6 +28,7 @@ using DigitalWorldOnline.GameHost;
 using MediatR;
 using Serilog;
 using System.IO;
+using System.Linq;
 
 namespace DigitalWorldOnline.Game.PacketProcessors
 {
@@ -88,9 +90,11 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             client.Send(new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory));
 
             _logger.Debug($"Sending warehouse packet for character {client.TamerId}...");
+            LogWarehouseDiagnostics(client, "Warehouse", client.Tamer.Warehouse.Items);
             client.Send(new LoadInventoryPacket(client.Tamer.Warehouse, InventoryTypeEnum.Warehouse));
 
             _logger.Debug($"Sending account warehouse packet for character {client.TamerId}...");
+            LogWarehouseDiagnostics(client, "AccountWarehouse", client.Tamer.AccountWarehouse.Items);
             client.Send(new LoadInventoryPacket(client.Tamer.AccountWarehouse, InventoryTypeEnum.AccountWarehouse));
 
             _logger.Debug($"Getting server exp information for character {client.TamerId}...");
@@ -292,6 +296,25 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             {
                 client.Send(new SystemMessagePacket($"Unknown map info for map id {client.Tamer.Location.MapId}."));
                 _logger.Warning($"Unknown map info for map id {client.Tamer.Location.MapId}.");
+            }
+        }
+
+        private void LogWarehouseDiagnostics(GameClient client, string listName, List<ItemModel> items)
+        {
+            var enabled = items.Where(x => x.ItemId > 0).ToList();
+            var missingInfo = enabled.Where(x => x.ItemInfo == null).Take(10).ToList();
+            if (missingInfo.Any())
+            {
+                var sample = string.Join(", ", missingInfo.Select(x => $"slot={x.Slot} item={x.ItemId} amt={x.Amount}"));
+                _logger.Warning(
+                    "Warehouse diagnostics: {ListName} for tamer {TamerId} has {MissingCount}/{EnabledCount} items with null ItemInfo. Sample: {Sample}",
+                    listName, client.TamerId, enabled.Count(x => x.ItemInfo == null), enabled.Count, sample);
+            }
+            else
+            {
+                _logger.Debug(
+                    "Warehouse diagnostics: {ListName} for tamer {TamerId} loaded {EnabledCount} enabled items; all have ItemInfo.",
+                    listName, client.TamerId, enabled.Count);
             }
         }
 

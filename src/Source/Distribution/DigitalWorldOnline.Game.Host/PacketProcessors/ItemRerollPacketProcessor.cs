@@ -1,5 +1,6 @@
 ﻿using DigitalWorldOnline.Application;
 using DigitalWorldOnline.Application.GameAssets;
+using DigitalWorldOnline.Application.GameAssets.Bins;
 using DigitalWorldOnline.Application.Separar.Commands.Update;
 using DigitalWorldOnline.Commons.Entities;
 using DigitalWorldOnline.Commons.Enums;
@@ -14,6 +15,7 @@ using DigitalWorldOnline.Commons.Utils;
 
 using MediatR;
 using Serilog;
+using System.Linq;
 
 namespace DigitalWorldOnline.Game.PacketProcessors
 {
@@ -59,79 +61,23 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             10053, 45002, 47002, 47006
         };
 
-        private readonly List<StatusLimit> StatusLimit;
-
         public GameServerPacketEnum Type => GameServerPacketEnum.ItemReroll;
 
         private readonly AssetsLoader _assets;
+        private readonly ItemListBinLoader _itemListBinLoader;
         private readonly ISender _sender;
         private readonly ILogger _logger;
 
         public ItemRerollPacketProcessor(
             AssetsLoader assets,
+            ItemListBinLoader itemListBinLoader,
             ISender sender,
             ILogger logger)
         {
             _assets = assets;
+            _itemListBinLoader = itemListBinLoader;
             _sender = sender;
             _logger = logger;
-
-            StatusLimit = new List<StatusLimit>()
-            {
-                new StatusLimit(AccessoryTypeEnum.Ring, AccessoryStatusTypeEnum.HP, 3),
-                new StatusLimit(AccessoryTypeEnum.Ring, AccessoryStatusTypeEnum.DS, 3),
-                new StatusLimit(AccessoryTypeEnum.Ring, AccessoryStatusTypeEnum.AT, 2),
-                new StatusLimit(AccessoryTypeEnum.Ring, AccessoryStatusTypeEnum.CT, 2),
-                new StatusLimit(AccessoryTypeEnum.Ring, AccessoryStatusTypeEnum.DE, 2),
-                new StatusLimit(AccessoryTypeEnum.Ring, AccessoryStatusTypeEnum.ATT, 2),
-                new StatusLimit(AccessoryTypeEnum.Ring, AccessoryStatusTypeEnum.SCD, 2),
-
-                new StatusLimit(AccessoryTypeEnum.Necklace, AccessoryStatusTypeEnum.HP, 3),
-                new StatusLimit(AccessoryTypeEnum.Necklace, AccessoryStatusTypeEnum.DS, 3),
-                new StatusLimit(AccessoryTypeEnum.Necklace, AccessoryStatusTypeEnum.AT, 1),
-                new StatusLimit(AccessoryTypeEnum.Necklace, AccessoryStatusTypeEnum.AS, 1),
-                new StatusLimit(AccessoryTypeEnum.Necklace, AccessoryStatusTypeEnum.CD, 1),
-                new StatusLimit(AccessoryTypeEnum.Necklace, AccessoryStatusTypeEnum.CT, 2),
-                new StatusLimit(AccessoryTypeEnum.Necklace, AccessoryStatusTypeEnum.DE, 2),
-                new StatusLimit(AccessoryTypeEnum.Necklace, AccessoryStatusTypeEnum.ATT, 2),
-                new StatusLimit(AccessoryTypeEnum.Necklace, AccessoryStatusTypeEnum.SCD, 1),
-
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.HP, 2),
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.DS, 2),
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.HT, 1),
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.BL, 1),
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.CD, 2),
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.CT, 1),
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.DE, 2),
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.ATT, 2),
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.SCD, 1),
-                new StatusLimit(AccessoryTypeEnum.Earring, AccessoryStatusTypeEnum.EV, 1),
-
-                new StatusLimit(AccessoryTypeEnum.Bracelet, AccessoryStatusTypeEnum.HP, 2),
-                new StatusLimit(AccessoryTypeEnum.Bracelet, AccessoryStatusTypeEnum.DS, 2),
-                new StatusLimit(AccessoryTypeEnum.Bracelet, AccessoryStatusTypeEnum.AT, 1),
-                new StatusLimit(AccessoryTypeEnum.Bracelet, AccessoryStatusTypeEnum.CD, 2),
-                new StatusLimit(AccessoryTypeEnum.Bracelet, AccessoryStatusTypeEnum.CT, 2),
-                new StatusLimit(AccessoryTypeEnum.Bracelet, AccessoryStatusTypeEnum.BL, 2),
-                new StatusLimit(AccessoryTypeEnum.Bracelet, AccessoryStatusTypeEnum.SCD, 1),
-                new StatusLimit(AccessoryTypeEnum.Bracelet, AccessoryStatusTypeEnum.HT, 2),
-                new StatusLimit(AccessoryTypeEnum.Bracelet, AccessoryStatusTypeEnum.EV, 2),
-
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Data, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Vacina, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Virus, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Unknown, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Ice, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Water, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Fire, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Earth, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Wind, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Wood, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Light, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Dark, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Thunder, 1),
-                new StatusLimit(AccessoryTypeEnum.Digivice, AccessoryStatusTypeEnum.Steel, 1)
-            };
         }
 
         public async Task Process(GameClient client, byte[] packetData)
@@ -141,14 +87,21 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             var tamerHandle = packet.ReadInt();
             var consumableSlot = packet.ReadShort();
             var accessorySlot = packet.ReadShort();
-            var changedStatusSlot = packet.ReadByte();
+            byte changedStatusSlot = 0;
+            int remaining = (packet.Length - 2) - (int)packet.Packet.Position;
+            if (remaining > 0)
+                changedStatusSlot = packet.ReadByte();
 
             var consumedStone = client.Tamer.Inventory.FindItemBySlot(consumableSlot);
             if (consumedStone == null || consumedStone.ItemId == 0)
             {
                 _logger.Warning($"Invalid item at slot {consumableSlot} for tamer {client.TamerId}.");
+                var accessorySnapshot = client.Tamer.Inventory.FindItemBySlot(accessorySlot);
                 client.Send(
                     UtilitiesFunctions.GroupPackets(
+                        accessorySnapshot != null
+                            ? new ItemRerollPacket(2, accessorySlot, accessorySnapshot).Serialize()
+                            : Array.Empty<byte>(),
                         new SystemMessagePacket($"Invalid stone at slot {consumableSlot}.").Serialize(),
                         new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
                     )
@@ -162,6 +115,7 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 _logger.Warning($"Invalid item at slot {accessorySlot} for tamer {client.TamerId}.");
                 client.Send(
                     UtilitiesFunctions.GroupPackets(
+                        new ItemRerollPacket(2, accessorySlot, new Commons.Models.Base.ItemModel()).Serialize(),
                         new SystemMessagePacket($"Invalid accessory at slot {accessorySlot}.").Serialize(),
                         new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize()
                     )
@@ -424,34 +378,25 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                         return;
                     }
 
-                    var accessoryAsset = _assets.AccessoryRoll.FirstOrDefault(x => x.ItemId == targetAccessory.ItemId);
-                    if (accessoryAsset != null)
+                    var optionInfo = ResolveAccessoryOptionInfo(itemInfo.Type);
+                    if (optionInfo != null)
                     {
                         targetAccessory.AccessoryStatus = targetAccessory.AccessoryStatus.OrderBy(x => x.Slot).ToList();
 
-                        for (int i = 0; i < accessoryAsset.StatusAmount; i++)
+                        int statusAmount = Math.Max(0, Math.Min(targetAccessory.AccessoryStatus.Count, optionInfo.MaxStatusCount));
+                        for (int i = 0; i < statusAmount; i++)
                         {
-                            var forbiddenStatusType = new List<AccessoryStatusTypeEnum>();
+                            var possibleStatus = optionInfo.Options
+                                .Where(x => targetAccessory.StatusAmount(x.Type) < x.MaxAmount)
+                                .ToList();
+                            if (!possibleStatus.Any())
+                                continue;
 
-                            if (accessoryAsset.StatusAmount > 1)
-                            {
-                                foreach (AccessoryStatusTypeEnum statusType in Enum.GetValues(typeof(AccessoryStatusTypeEnum)))
-                                {
-                                    var currentAmount = targetAccessory.StatusAmount(statusType);
+                            var selectedIndex = UtilitiesFunctions.RandomInt(0, possibleStatus.Count - 1);
+                            var newStatus = possibleStatus[selectedIndex];
 
-                                    if (currentAmount >= StatusLimit.FirstOrDefault(x => x.Accessory == (AccessoryTypeEnum)itemInfo.Type && x.Status == statusType)?.MaxAmount)
-                                    {
-                                        forbiddenStatusType.Add(statusType);
-                                    }
-                                }
-                            }
-
-                            var possibleStatus = accessoryAsset.Status.Where(x => !forbiddenStatusType.Contains((AccessoryStatusTypeEnum)x.Type));
-
-                            var newStatus = possibleStatus.OrderBy(x => Guid.NewGuid()).First();
-
-                            targetAccessory.AccessoryStatus[i].SetType((AccessoryStatusTypeEnum)newStatus.Type);
-                            targetAccessory.AccessoryStatus[i].SetValue(UtilitiesFunctions.RandomShort((short)newStatus.MinValue, (short)(newStatus.MaxValue)));
+                            targetAccessory.AccessoryStatus[i].SetType(newStatus.Type);
+                            targetAccessory.AccessoryStatus[i].SetValue(UtilitiesFunctions.RandomShort(newStatus.MinValue, newStatus.MaxValue));
                         }
 
                         var statusString = targetAccessory.AccessoryStatus.Where(x => x.Value > 0)?.Select(x => $"{x.Type} {x.Value}");
@@ -475,10 +420,10 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             UtilitiesFunctions.GroupPackets(
                                 new ItemRerollPacket(result, accessorySlot, targetAccessory).Serialize(),
                                 new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize(),
-                                new SystemMessagePacket($"Invalid accessory asset for item {targetAccessory.ItemId}.").Serialize()
+                                new SystemMessagePacket($"Invalid accessory option data for item {targetAccessory.ItemId}.").Serialize()
                             )
                         );
-                        _logger.Warning($"Invalid accessory asset with item id {targetAccessory.ItemId} for tamer {client.TamerId}.");
+                        _logger.Warning($"Invalid accessory option bin data for item {targetAccessory.ItemId} and tamer {client.TamerId}.");
                         return;
                     }
                 }
@@ -504,12 +449,46 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                 {
                     targetAccessory.RerollLeft -= 1;
 
-                    var accessoryAsset = _assets.AccessoryRoll.FirstOrDefault(x => x.ItemId == targetAccessory.ItemId);
-                    if (accessoryAsset != null)
+                    var itemInfo = _assets.ItemInfo.FirstOrDefault(x => x.ItemId == targetAccessory.ItemId);
+                    if (itemInfo == null)
+                    {
+                        result = 3;
+
+                        client.Tamer.Inventory.RemoveOrReduceItem(consumedStone, 1);
+
+                        client.Send(
+                            UtilitiesFunctions.GroupPackets(
+                                new ItemRerollPacket(result, accessorySlot, targetAccessory).Serialize(),
+                                new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize(),
+                                new SystemMessagePacket($"Invalid item info for item {targetAccessory.ItemId}.").Serialize()
+                            )
+                        );
+                        _logger.Warning($"Invalid item info for item {targetAccessory.ItemId} and tamer {client.TamerId}.");
+                        return;
+                    }
+
+                    var optionInfo = ResolveAccessoryOptionInfo(itemInfo.Type);
+                    if (optionInfo != null)
                     {
                         targetAccessory.AccessoryStatus = targetAccessory.AccessoryStatus.OrderBy(x => x.Slot).ToList();
 
-                        var newStatus = accessoryAsset.Status.FirstOrDefault(x => (AccessoryStatusTypeEnum)x.Type == targetAccessory.AccessoryStatus[changedStatusSlot].Type);
+                        if (changedStatusSlot >= targetAccessory.AccessoryStatus.Count)
+                        {
+                            result = 3;
+                            client.Tamer.Inventory.RemoveOrReduceItem(consumedStone, 1);
+                            client.Send(
+                                UtilitiesFunctions.GroupPackets(
+                                    new ItemRerollPacket(result, accessorySlot, targetAccessory).Serialize(),
+                                    new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize(),
+                                    new SystemMessagePacket($"Invalid accessory status slot {changedStatusSlot}.").Serialize()
+                                )
+                            );
+                            _logger.Warning($"Invalid accessory status slot {changedStatusSlot} for item {targetAccessory.ItemId} and tamer {client.TamerId}.");
+                            return;
+                        }
+
+                        var selectedType = targetAccessory.AccessoryStatus[changedStatusSlot].Type;
+                        var newStatus = optionInfo.Options.FirstOrDefault(x => x.Type == selectedType);
 
                         if (newStatus == null)
                         {
@@ -521,14 +500,14 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                                 UtilitiesFunctions.GroupPackets(
                                     new ItemRerollPacket(result, accessorySlot, targetAccessory).Serialize(),
                                     new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize(),
-                                    new SystemMessagePacket($"Invalid accessory status reroll info for item {accessoryAsset.ItemId}.").Serialize()
+                                    new SystemMessagePacket($"Invalid accessory status reroll info for item {targetAccessory.ItemId}.").Serialize()
                                 )
                             );
-                            _logger.Warning($"Invalid accessory status for asset {accessoryAsset.Id} while tamer {client.TamerId} reroll.");
+                            _logger.Warning($"Invalid accessory status for item {targetAccessory.ItemId} while tamer {client.TamerId} reroll.");
                             return;
                         }
 
-                        targetAccessory.AccessoryStatus[changedStatusSlot].SetValue(UtilitiesFunctions.RandomShort((short)newStatus.MinValue, (short)(newStatus.MaxValue)));
+                        targetAccessory.AccessoryStatus[changedStatusSlot].SetValue(UtilitiesFunctions.RandomShort(newStatus.MinValue, newStatus.MaxValue));
 
                         client.Tamer.Inventory.RemoveOrReduceItem(consumedStone, 1);
 
@@ -549,10 +528,10 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                             UtilitiesFunctions.GroupPackets(
                                 new ItemRerollPacket(result, accessorySlot, targetAccessory).Serialize(),
                                 new LoadInventoryPacket(client.Tamer.Inventory, InventoryTypeEnum.Inventory).Serialize(),
-                                new SystemMessagePacket($"Invalid accessory asset for item {targetAccessory.ItemId}.").Serialize()
+                                new SystemMessagePacket($"Invalid accessory option data for item {targetAccessory.ItemId}.").Serialize()
                             )
                         );
-                        _logger.Warning($"Invalid accessory asset with item id {targetAccessory.ItemId} for tamer {client.TamerId}.");
+                        _logger.Warning($"Invalid accessory option bin data for item {targetAccessory.ItemId} and tamer {client.TamerId}.");
 
                         return;
                     }
@@ -560,6 +539,12 @@ namespace DigitalWorldOnline.Game.PacketProcessors
                     var statusString = targetAccessory.AccessoryStatus.Where(x => x.Value > 0)?.Select(x => $"{x.Type} {x.Value}");
                     _logger.Verbose($"Character {client.TamerId} rerolled status number for item {targetAccessory.ItemId} with {consumedStone.ItemId} power {targetAccessory.Power} " +
                         $"reroll {targetAccessory.RerollLeft} and new status {string.Join(',', statusString)}.");
+                    AccessoryParitySnapshot.LogItemSnapshot(
+                        _logger,
+                        "reroll-success",
+                        client.TamerId,
+                        accessorySlot,
+                        targetAccessory);
 
                     client.Send(
                         UtilitiesFunctions.GroupPackets(
@@ -574,5 +559,33 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             await _sender.Send(new UpdateItemAccessoryStatusCommand(targetAccessory));
             await _sender.Send(new UpdateItemCommand(consumedStone));
         }
+
+        private AccessoryOptionInfo? ResolveAccessoryOptionInfo(int accessoryType)
+        {
+            var record = _itemListBinLoader.Data.AccessoryOptions.FirstOrDefault(x => x.ItemType == (uint)accessoryType);
+            if (record == null)
+                return null;
+
+            var grouped = record.Options
+                .Where(x => Enum.IsDefined(typeof(AccessoryStatusTypeEnum), (int)x.OptionType))
+                .GroupBy(x => (AccessoryStatusTypeEnum)x.OptionType)
+                .Select(group =>
+                {
+                    short min = (short)Math.Clamp(group.Min(x => (long)x.MinValue), short.MinValue, short.MaxValue);
+                    short max = (short)Math.Clamp(group.Max(x => (long)x.MaxValue), short.MinValue, short.MaxValue);
+                    return new AccessoryOptionRange(group.Key, min, max, group.Count());
+                })
+                .ToList();
+
+            if (!grouped.Any())
+                return null;
+
+            int maxStatusCount = Math.Max(0, Math.Min(record.MaxValue, grouped.Sum(x => x.MaxAmount)));
+            return new AccessoryOptionInfo(maxStatusCount, grouped);
+        }
+
+        private sealed record AccessoryOptionInfo(int MaxStatusCount, List<AccessoryOptionRange> Options);
+
+        private sealed record AccessoryOptionRange(AccessoryStatusTypeEnum Type, short MinValue, short MaxValue, int MaxAmount);
     }
 }

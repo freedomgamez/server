@@ -7,6 +7,7 @@ using DigitalWorldOnline.Commons.Enums.PacketProcessor;
 using DigitalWorldOnline.Commons.Interfaces;
 using DigitalWorldOnline.Commons.Models.Base;
 using DigitalWorldOnline.Commons.Packets.GameServer;
+using DigitalWorldOnline.Commons.Packets.GameServer.Combat;
 using MediatR;
 using Serilog;
 
@@ -102,80 +103,86 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             for (int i = 0; i < nItemCnt; i++)
                 productIds.Add(packet.ReadInt());
 
-            // 1) Catalog resolution. The bin carries <c>StartTime</c>/<c>EndTime</c>
-            //    fields meant for live-ops campaigns; v487's shipped values are stale
-            //    (e.g. product 31020088 EndTime=2020-11-01) and would reject every
-            //    purchase on a private server. Gate on <c>Active</c> only — the catalog
-            //    editor's master enable flag — and let the server admin curate the bin
-            //    if they want a subset disabled.
-            var resolved = new List<CashShopProduct>(nItemCnt);
-            var failedProducts = new List<int>();
-            foreach (var pid in productIds)
+            try
             {
-                if (!_catalog.Data.ByProductId.TryGetValue((uint)pid, out var product))
+
+                // 1) Catalog resolution. The bin carries <c>StartTime</c>/<c>EndTime</c>
+                //    fields meant for live-ops campaigns; v487's shipped values are stale
+                //    (e.g. product 31020088 EndTime=2020-11-01) and would reject every
+                //    purchase on a private server. Gate on <c>Active</c> only — the catalog
+                //    editor's master enable flag — and let the server admin curate the bin
+                //    if they want a subset disabled.
+                var resolved = new List<CashShopProduct>(nItemCnt);
+                var failedProducts = new List<int>();
+                foreach (var pid in productIds)
                 {
-                    failedProducts.Add(pid);
-                    _logger.Warning(
-                        "CashShop MultiBuy: tamer {TamerId} requested unknown productID {Pid}.",
-                        client.TamerId, pid);
-                    continue;
+                    if (!_catalog.Data.ByProductId.TryGetValue((uint)pid, out var product))
+                    {
+                        failedProducts.Add(pid);
+                        _logger.Warning(
+                            "CashShop MultiBuy: tamer {TamerId} requested unknown productID {Pid}.",
+                            client.TamerId, pid);
+                        continue;
+                    }
+                    if (!product.Active)
+                    {
+                        failedProducts.Add(pid);
+                        _logger.Warning(
+                            "CashShop MultiBuy: tamer {TamerId} productID {Pid} marked inactive in catalog.",
+                            client.TamerId, pid);
+                        continue;
+                    }
+                    resolved.Add(product);
                 }
-                if (!product.Active)
+
+                if (resolved.Count == 0)
                 {
-                    failedProducts.Add(pid);
-                    _logger.Warning(
-                        "CashShop MultiBuy: tamer {TamerId} productID {Pid} marked inactive in catalog.",
-                        client.TamerId, pid);
-                    continue;
+                    Reply(client, CashShopMultiBuyResponsePacket.ResultUnknownProduct,
+                        new List<int>(), failedProducts);
+                    client.Send(new CashShopCoinsPacket(client.Premium, client.Silk));
+                    return;
                 }
-                resolved.Add(product);
-            }
 
-            if (resolved.Count == 0)
-            {
-                Reply(client, CashShopMultiBuyResponsePacket.ResultUnknownProduct,
-                    new List<int>(), failedProducts);
-                return;
-            }
+                // 2) Price validation — sum the catalog's RealPrice for the resolved products,
+                //    compare against client's nTotalPrice. Failed products don't contribute
+                //    to the expected total since they aren't being purchased.
+                int expectedPrice = resolved.Sum(p => p.Price);
+                if (expectedPrice != nTotalPrice && failedProducts.Count == 0)
+                {
+                    _logger.Warning(
+                        "CashShop MultiBuy: tamer {TamerId} price mismatch — client={Client} catalog={Server}.",
+                        client.TamerId, nTotalPrice, expectedPrice);
+                    Reply(client, CashShopMultiBuyResponsePacket.ResultPriceMismatch,
+                        new List<int>(), productIds);
+                    client.Send(new CashShopCoinsPacket(client.Premium, client.Silk));
+                    return;
+                }
 
-            // 2) Price validation — sum the catalog's RealPrice for the resolved products,
-            //    compare against client's nTotalPrice. Failed products don't contribute
-            //    to the expected total since they aren't being purchased.
-            int expectedPrice = resolved.Sum(p => p.Price);
-            if (expectedPrice != nTotalPrice && failedProducts.Count == 0)
-            {
-                _logger.Warning(
-                    "CashShop MultiBuy: tamer {TamerId} price mismatch — client={Client} catalog={Server}.",
-                    client.TamerId, nTotalPrice, expectedPrice);
-                Reply(client, CashShopMultiBuyResponsePacket.ResultPriceMismatch,
-                    new List<int>(), productIds);
-                return;
-            }
-
-            // 3) Balance check
-            int totalCash = client.Premium + client.Silk;
-            if (totalCash < expectedPrice)
-            {
-                _logger.Information(
-                    "CashShop MultiBuy: tamer {TamerId} insufficient cash — need {Need} have {Have}.",
-                    client.TamerId, expectedPrice, totalCash);
-                Reply(client, CashShopMultiBuyResponsePacket.ResultInsufficientCash,
-                    new List<int>(), productIds);
-                return;
-            }
+                // 3) Balance check
+                int totalCash = client.Premium + client.Silk;
+                if (totalCash < expectedPrice)
+                {
+                    _logger.Information(
+                        "CashShop MultiBuy: tamer {TamerId} insufficient cash — need {Need} have {Have}.",
+                        client.TamerId, expectedPrice, totalCash);
+                    Reply(client, CashShopMultiBuyResponsePacket.ResultInsufficientCash,
+                        new List<int>(), productIds);
+                    client.Send(new CashShopCoinsPacket(client.Premium, client.Silk));
+                    return;
+                }
 
             // 4) Debit. Premium first; spillover comes out of Silk. The client's
             //    NewCashshopContents.cpp shows Premium ("RealCash") and Silk
             //    ("BonusCash") as fungible from the user's perspective — both pools
             //    contribute to the buying-power total.
-            int needed = expectedPrice;
-            int debitPremium = Math.Min(client.Premium, needed);
-            client.AddPremium(-debitPremium);
-            needed -= debitPremium;
-            if (needed > 0)
-            {
-                client.AddSilk(-needed);
-            }
+                int needed = expectedPrice;
+                int debitPremium = Math.Min(client.Premium, needed);
+                client.AddPremium(-debitPremium);
+                needed -= debitPremium;
+                if (needed > 0)
+                {
+                    client.AddSilk(-needed);
+                }
 
             // GameClient.Premium/Silk are the in-memory runtime mirrors; the persistent
             // backing store gets reconciled via UpdatePremiumAndSilkCommand at the end
@@ -195,106 +202,132 @@ namespace DigitalWorldOnline.Game.PacketProcessors
             //    BuyHistory lists arrive empty. Then GetEmptySlot returns -1 and
             //    InsertItem crashes on Items[-1]. Padding here is idempotent —
             //    already-populated lists stay untouched.
-            var successProducts = new List<int>();
-            var cashWarehouse = client.Tamer.AccountCashWarehouse;
-            EnsurePlaceholderSlots(cashWarehouse);
-            EnsurePlaceholderSlots(client.Tamer.AccountBuyHistory);
-            foreach (var product in resolved)
-            {
-                bool allPlaced = true;
-                var rollback = new List<ItemModel>();
-                foreach (var pkg in product.PackageItems)
+                var successProducts = new List<int>();
+                var cashWarehouse = client.Tamer.AccountCashWarehouse;
+                EnsurePlaceholderSlots(cashWarehouse);
+                EnsurePlaceholderSlots(client.Tamer.AccountBuyHistory);
+                foreach (var product in resolved)
                 {
-                    if (pkg.ItemId == 0 || pkg.Count == 0) continue;
-                    var info = _assets.ItemInfo.FirstOrDefault(x => x.ItemId == (int)pkg.ItemId);
-                    if (info == null)
+                    bool allPlaced = true;
+                    var rollback = new List<ItemModel>();
+                    foreach (var pkg in product.PackageItems)
                     {
-                        _logger.Warning(
-                            "CashShop MultiBuy: product {Pid} references unknown item {Iid}; rolling back.",
-                            product.ProductId, pkg.ItemId);
-                        allPlaced = false;
-                        break;
-                    }
-                    var item = new ItemModel();
-                    item.SetItemInfo(info);
-                    item.ItemId = (int)pkg.ItemId;
-                    item.Amount = pkg.Count;
-                    item.ItemListId = cashWarehouse.Id;     // FK to Shared_ItemList
-                    if (item.IsTemporary)
-                        item.SetRemainingTime((uint)item.ItemInfo.UsageTimeMinutes);
-
-                    if (!cashWarehouse.AddItem(item))
-                    {
-                        allPlaced = false;
-                        break;
-                    }
-                    rollback.Add(item);
-                }
-
-                if (allPlaced)
-                {
-                    successProducts.Add((int)product.ProductId);
-                    // Append productID to BuyHistory — store as an item with
-                    // ItemId == ProductId so the existing list serializer works.
-                    // Buy-history is informational only (catalog UI dim state); we
-                    // don't need to track per-purchase metadata beyond the ID.
-                    //
-                    // Use AddItemWithSlot directly: AddItem's Overlap-split path
-                    // dereferences ItemInfo.Overlap, but BuyHistory entries are
-                    // synthetic and have no ItemInfo (they're product IDs, not real
-                    // game items). Single-slot insert avoids the NRE entirely.
-                    var history = client.Tamer.AccountBuyHistory;
-                    if (history != null)
-                    {
-                        int slot = history.GetEmptySlot;
-                        if (slot >= 0)
+                        if (pkg.ItemId == 0 || pkg.Count == 0) continue;
+                        var info = _assets.ItemInfo.FirstOrDefault(x => x.ItemId == (int)pkg.ItemId);
+                        if (info == null)
                         {
-                            var historyEntry = new ItemModel();
-                            historyEntry.ItemId = (int)product.ProductId;
-                            historyEntry.Amount = 1;
-                            historyEntry.ItemListId = history.Id;   // FK to Shared_ItemList
-                            history.AddItemWithSlot(historyEntry, slot);
+                            _logger.Warning(
+                                "CashShop MultiBuy: product {Pid} references unknown item {Iid}; rolling back.",
+                                product.ProductId, pkg.ItemId);
+                            allPlaced = false;
+                            break;
                         }
-                        // BuyHistory full → silently drop; UI dim is best-effort,
-                        // not a transaction-blocker.
+                        var item = new ItemModel();
+                        item.SetItemInfo(info);
+                        item.ItemId = (int)pkg.ItemId;
+                        item.Amount = pkg.Count;
+                        item.ItemListId = cashWarehouse.Id;     // FK to Shared_ItemList
+                        if (item.IsTemporary)
+                            item.SetRemainingTime((uint)item.ItemInfo.UsageTimeMinutes);
+
+                        if (!cashWarehouse.AddItem(item))
+                        {
+                            allPlaced = false;
+                            break;
+                        }
+                        rollback.Add(item);
+                    }
+
+                    if (allPlaced)
+                    {
+                        successProducts.Add((int)product.ProductId);
+                        // Append productID to BuyHistory — store as an item with
+                        // ItemId == ProductId so the existing list serializer works.
+                        // Buy-history is informational only (catalog UI dim state); we
+                        // don't need to track per-purchase metadata beyond the ID.
+                        //
+                        // Use AddItemWithSlot directly: AddItem's Overlap-split path
+                        // dereferences ItemInfo.Overlap, but BuyHistory entries are
+                        // synthetic and have no ItemInfo (they're product IDs, not real
+                        // game items). Single-slot insert avoids the NRE entirely.
+                        var history = client.Tamer.AccountBuyHistory;
+                        if (history != null)
+                        {
+                            int slot = history.GetEmptySlot;
+                            if (slot >= 0)
+                            {
+                                var historyEntry = new ItemModel();
+                                historyEntry.ItemId = (int)product.ProductId;
+                                historyEntry.Amount = 1;
+                                historyEntry.ItemListId = history.Id;   // FK to Shared_ItemList
+                                history.AddItemWithSlot(historyEntry, slot);
+                            }
+                            // BuyHistory full → silently drop; UI dim is best-effort,
+                            // not a transaction-blocker.
+                        }
+                    }
+                    else
+                    {
+                        // Roll back this product's partial grants so the warehouse stays
+                        // consistent with the failed-list response.
+                        foreach (var item in rollback)
+                            cashWarehouse.RemoveOrReduceItem(item, item.Amount, item.Slot);
+                        failedProducts.Add((int)product.ProductId);
+                        _logger.Warning(
+                            "CashShop MultiBuy: tamer {TamerId} product {Pid} dropped — cash warehouse full.",
+                            client.TamerId, product.ProductId);
                     }
                 }
-                else
+
+                // If everything failed at the grant stage, refund the cash so the player
+                // isn't charged for nothing.
+                if (successProducts.Count == 0)
                 {
-                    // Roll back this product's partial grants so the warehouse stays
-                    // consistent with the failed-list response.
-                    foreach (var item in rollback)
-                        cashWarehouse.RemoveOrReduceItem(item, item.Amount);
-                    failedProducts.Add((int)product.ProductId);
-                    _logger.Warning(
-                        "CashShop MultiBuy: tamer {TamerId} product {Pid} dropped — cash warehouse full.",
-                        client.TamerId, product.ProductId);
+                    client.AddPremium(debitPremium);
+                    if (expectedPrice - debitPremium > 0)
+                        client.AddSilk(expectedPrice - debitPremium);
+                    Reply(client, CashShopMultiBuyResponsePacket.ResultWarehouseFull,
+                        new List<int>(), failedProducts);
+                    client.Send(new CashShopCoinsPacket(client.Premium, client.Silk));
+                    return;
                 }
-            }
 
-            // If everything failed at the grant stage, refund the cash so the player
-            // isn't charged for nothing.
-            if (successProducts.Count == 0)
+                // 6) Persist
+                await _sender.Send(new UpdateItemsCommand(cashWarehouse));
+                await _sender.Send(new UpdatePremiumAndSilkCommand(client.Premium, client.Silk, client.AccountId));
+
+                // Buy-history is ancillary to the purchase. Keep checkout alive even if the
+                // history write hits a repository tracking issue in the current scope.
+                if (client.Tamer.AccountBuyHistory != null)
+                {
+                    try
+                    {
+                        await _sender.Send(new UpdateItemsCommand(client.Tamer.AccountBuyHistory));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning(ex,
+                            "CashShop MultiBuy: buy-history persistence failed for account {AccountId}; purchase remains committed.",
+                            client.AccountId);
+                    }
+                }
+
+                _logger.Information(
+                    "CashShop MultiBuy: tamer {TamerId} purchased {Success}/{Total} products for {Price} cash.",
+                    client.TamerId, successProducts.Count, productIds.Count, expectedPrice);
+
+                Reply(client, CashShopMultiBuyResponsePacket.ResultSuccess, successProducts, failedProducts);
+                client.Send(new CashShopCoinsPacket(client.Premium, client.Silk));
+                client.Send(new LoadAccountWarehousePacket(client.Tamer.AccountCashWarehouse));
+            }
+            catch (Exception ex)
             {
-                client.AddPremium(debitPremium);
-                if (expectedPrice - debitPremium > 0)
-                    client.AddSilk(expectedPrice - debitPremium);
-                Reply(client, CashShopMultiBuyResponsePacket.ResultWarehouseFull,
-                    new List<int>(), failedProducts);
-                return;
+                _logger.Error(ex,
+                    "CashShop MultiBuy crashed for tamer {TamerId} account {AccountId}.",
+                    client.TamerId, client.AccountId);
+                Reply(client, CashShopMultiBuyResponsePacket.ResultInternalError, new List<int>(), productIds);
+                client.Send(new CashShopCoinsPacket(client.Premium, client.Silk));
             }
-
-            // 6) Persist
-            await _sender.Send(new UpdatePremiumAndSilkCommand(client.Premium, client.Silk, client.AccountId));
-            await _sender.Send(new UpdateItemsCommand(cashWarehouse));
-            if (client.Tamer.AccountBuyHistory != null)
-                await _sender.Send(new UpdateItemsCommand(client.Tamer.AccountBuyHistory));
-
-            _logger.Information(
-                "CashShop MultiBuy: tamer {TamerId} purchased {Success}/{Total} products for {Price} cash.",
-                client.TamerId, successProducts.Count, productIds.Count, expectedPrice);
-
-            Reply(client, CashShopMultiBuyResponsePacket.ResultSuccess, successProducts, failedProducts);
         }
 
         private static void Reply(

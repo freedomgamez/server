@@ -217,6 +217,18 @@ namespace DigitalWorldOnline.Commons.Utils
             {
                 return ItemListMovimentationEnum.ChipsetToInventory;
             }
+            else if (originSlot.IsBetween(GeneralSizeEnum.InventoryMinSlot, GeneralSizeEnum.InventoryMaxSlot)
+                &&
+                destinationSlot == GeneralSizeEnum.JogressChipSetSlot.GetHashCode())
+            {
+                return ItemListMovimentationEnum.InventoryToJogressChipset;
+            }
+            else if (originSlot == GeneralSizeEnum.JogressChipSetSlot.GetHashCode()
+                &&
+                destinationSlot.IsBetween(GeneralSizeEnum.InventoryMinSlot, GeneralSizeEnum.InventoryMaxSlot))
+            {
+                return ItemListMovimentationEnum.JogressChipsetToInventory;
+            }
             else
             {
                 return ItemListMovimentationEnum.InvalidMovimentation;
@@ -362,8 +374,7 @@ namespace DigitalWorldOnline.Commons.Utils
         /// </summary>
         public static int GetElementDelta(this DigimonElementEnum hitter, DigimonElementEnum target)
         {
-            if (_natureSource is null) return 0;
-            return _natureSource.GetElementDelta(hitter, target);
+            return EnsureNatureSource().GetElementDelta(hitter, target);
         }
 
         /// <summary>
@@ -372,8 +383,31 @@ namespace DigitalWorldOnline.Commons.Utils
         /// </summary>
         public static int GetAttributePoint(this DigimonAttributeEnum hitter, DigimonAttributeEnum target, AttributeCompare cmp = AttributeCompare.Attack)
         {
-            if (_natureSource is null) return 100;
-            return _natureSource.GetAttributePoint(cmp, hitter, target);
+            return EnsureNatureSource().GetAttributePoint(cmp, hitter, target);
+        }
+
+        /// <summary>
+        /// Applies Nature.bin attribute + element matrices to a raw damage value.
+        /// Attribute matrix is an absolute percent (e.g. 90/100/110), then element
+        /// matrix is a signed percent delta (e.g. -25/0/+25).
+        /// </summary>
+        public static int ApplyNatureMatrixDamage(
+            int baseDamage,
+            DigimonAttributeEnum attackerAttribute,
+            DigimonAttributeEnum targetAttribute,
+            DigimonElementEnum attackerElement,
+            DigimonElementEnum targetElement)
+        {
+            if (baseDamage <= 0)
+                return 0;
+
+            var attributePercent = attackerAttribute.GetAttributePoint(targetAttribute);
+            var elementDelta = attackerElement.GetElementDelta(targetElement);
+
+            var adjustedDamage = (long)baseDamage * attributePercent / 100;
+            adjustedDamage = adjustedDamage * (100 + elementDelta) / 100;
+
+            return adjustedDamage <= 0 ? 0 : (int)adjustedDamage;
         }
 
         /// <summary>
@@ -384,18 +418,7 @@ namespace DigitalWorldOnline.Commons.Utils
         /// </summary>
         public static bool HasAttributeAdvantage(this DigimonAttributeEnum hitter, DigimonAttributeEnum target)
         {
-            if (_natureSource is not null)
-                return hitter.GetAttributePoint(target) > 100;
-
-            // Fallback for non-Game.Host contexts that never registered a nature source.
-            return hitter switch
-            {
-                DigimonAttributeEnum.Data => target == DigimonAttributeEnum.None || target == DigimonAttributeEnum.Vaccine,
-                DigimonAttributeEnum.Vaccine => target == DigimonAttributeEnum.None || target == DigimonAttributeEnum.Virus,
-                DigimonAttributeEnum.Virus => target == DigimonAttributeEnum.None || target == DigimonAttributeEnum.Data,
-                DigimonAttributeEnum.Unknown => true,
-                _ => false,
-            };
+            return hitter.GetAttributePoint(target) > 100;
         }
 
         /// <summary>
@@ -404,24 +427,12 @@ namespace DigitalWorldOnline.Commons.Utils
         /// </summary>
         public static bool HasElementAdvantage(this DigimonElementEnum hitter, DigimonElementEnum target)
         {
-            if (_natureSource is not null)
-                return hitter.GetElementDelta(target) > 0;
-
-            return hitter switch
-            {
-                DigimonElementEnum.Ice => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Water,
-                DigimonElementEnum.Water => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Fire,
-                DigimonElementEnum.Fire => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Ice,
-                DigimonElementEnum.Land => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Wind,
-                DigimonElementEnum.Wind => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Wood,
-                DigimonElementEnum.Wood => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Land,
-                DigimonElementEnum.Light => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Dark,
-                DigimonElementEnum.Dark => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Thunder,
-                DigimonElementEnum.Thunder => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Steel,
-                DigimonElementEnum.Steel => target == DigimonElementEnum.Neutral || target == DigimonElementEnum.Light,
-                _ => false,
-            };
+            return hitter.GetElementDelta(target) > 0;
         }
+
+        private static NatureData EnsureNatureSource()
+            => _natureSource ?? throw new InvalidOperationException(
+                "Nature matrix source was not registered. Game.Host must load Nature.bin at startup.");
 
         public static bool HasAcessoryAttribute(this DigimonAttributeEnum hitter, AccessoryStatusTypeEnum accessory)
         {

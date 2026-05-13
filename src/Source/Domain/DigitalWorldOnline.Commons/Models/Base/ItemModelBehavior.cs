@@ -146,6 +146,23 @@ namespace DigitalWorldOnline.Commons.Models.Base
         /// <param name="amount">The amount to be reduced</param>
         public void ReduceAmount(int amount) => Amount -= amount;
 
+        public bool CanIncrease(int amount)
+        {
+            if (amount <= 0 || ItemInfo == null || ItemId == 0)
+                return false;
+
+            return Amount + amount <= ItemInfo.Overlap;
+        }
+
+        public int GetMaxIncreaseCapacity()
+        {
+            if (ItemInfo == null || ItemId == 0)
+                return 0;
+
+            var capacity = ItemInfo.Overlap - Amount;
+            return capacity > 0 ? capacity : 0;
+        }
+
         /// <summary>
         /// Updates the sell price at tamer shop.
         /// </summary>
@@ -190,21 +207,23 @@ namespace DigitalWorldOnline.Commons.Models.Base
                     // separate u4s leaves m_nCount = 0 → the client's icon renderer
                     // falls back to "1" / 0-count assert. Pack here.
                     uint mNAll = ((uint)ItemId & 0x1FFFFu) | (((uint)Amount & 0x7FFFu) << 17);
-                    m.Write(BitConverter.GetBytes(mNAll), 0, 4);
-                    m.Write(BitConverter.GetBytes(0), 0, 4);   // was Amount u4 — now reserved
+                    m.Write(BitConverter.GetBytes(mNAll), 0, 4); // cItemData::m_nAll
 
                     if (simplified)
                     {
-                        m.Write(new byte[60]);
+                        m.Write(new byte[64]); // remaining bytes in sizeof(cItemData)=68
                     }
                     else
                     {
-                   
-                        m.Write(BitConverter.GetBytes(0), 0, 2);
-                        m.Write(BitConverter.GetBytes(0), 0, 2);
-                        m.Write(BitConverter.GetBytes((short)Power), 0, 1);
-                        m.Write(BitConverter.GetBytes((short)RerollLeft), 0, 1);
-                        m.Write(BitConverter.GetBytes(ItemInfo.BoundType), 0, 2);
+                        // cItemData layout (pack(4)):
+                        // u1 m_nRate, u1 m_nLevel, u1 m_nLimited, pad1,
+                        // u2[3] m_nSockItemType, u1[3] m_nSockAppRate, pad1,
+                        // u2[8] m_nAccOption, u2[8] m_nAccValues,
+                        // u4 m_nEndTime, u4 m_nRemainTradeLimitTime, u8 ExtraBytes
+                        m.WriteByte(Power);
+                        m.WriteByte(RerollLeft);
+                        m.WriteByte((byte)(ItemInfo?.BoundType ?? 0));
+                        m.WriteByte(0); // alignment padding before u2 array
 
                         foreach (var socketStatus in SocketStatus.OrderBy(x => x.Slot))
                         {
@@ -217,7 +236,7 @@ namespace DigitalWorldOnline.Commons.Models.Base
                             m.Write(BitConverter.GetBytes(socketStatus.Value), 0, 1);
                         }
 
-                        m.Write(BitConverter.GetBytes(0), 0, 1);
+                        m.WriteByte(0); // alignment padding before accessory u2 array
 
                         foreach (var accessoryStatus in AccessoryStatus.OrderBy(x => x.Slot))
                         {
@@ -229,7 +248,7 @@ namespace DigitalWorldOnline.Commons.Models.Base
                             m.Write(BitConverter.GetBytes(accessoryStatus.Value), 0, 2);
                         }
 
-                        m.Write(BitConverter.GetBytes(0), 0, 2);
+                        m.Write(BitConverter.GetBytes((ushort)0), 0, 2); // alignment padding before u4
 
                         if (RemainingMinutes() == 0xFFFFFFFF)
                         {
@@ -238,10 +257,13 @@ namespace DigitalWorldOnline.Commons.Models.Base
                         else
                         {
                             var ts = UtilitiesFunctions.RemainingTimeMinutes((int)RemainingMinutes());
-
-                            m.Write(BitConverter.GetBytes(ts), 0, 4) ;
+                            m.Write(BitConverter.GetBytes(ts), 0, 4);
                         }
 
+                        m.Write(BitConverter.GetBytes(0), 0, 4); // m_nRemainTradeLimitTime
+
+                        // ExtraBytes (u8 in COMPAT_487)
+                        m.Write(BitConverter.GetBytes(0), 0, 4);
                         m.Write(BitConverter.GetBytes(0), 0, 4);
                     }
                 }
@@ -281,27 +303,27 @@ namespace DigitalWorldOnline.Commons.Models.Base
 
             using (MemoryStream m = new())
             {
-                m.Write(BitConverter.GetBytes(mNAll), 0, 4);    // packed type|count
-                m.Write(BitConverter.GetBytes(0), 0, 4);        // was Amount u4 — now reserved
+                m.Write(BitConverter.GetBytes(mNAll), 0, 4);    // cItemData::m_nAll
 
                 if (simplified)
                 {
-                    m.Write(new byte[60]);
+                    m.Write(new byte[64]); // remaining bytes in sizeof(cItemData)=68
                 }
                 else
                 {
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes((short)Power), 0, 1);
-                    m.Write(BitConverter.GetBytes((short)RerollLeft), 0, 1);
-                    m.Write(BitConverter.GetBytes(ItemInfo.BoundType), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
-                    m.Write(BitConverter.GetBytes(0), 0, 1);
-                    m.Write(BitConverter.GetBytes(0), 0, 1);
-                    m.Write(BitConverter.GetBytes(0), 0, 1);
-                    m.Write(BitConverter.GetBytes(0), 0, 1);
+                    m.WriteByte(Power);
+                    m.WriteByte(RerollLeft);
+                    m.WriteByte((byte)(ItemInfo?.BoundType ?? 0));
+                    m.WriteByte(0); // alignment padding before u2 array
+
+                    m.Write(BitConverter.GetBytes((ushort)0), 0, 2);
+                    m.Write(BitConverter.GetBytes((ushort)0), 0, 2);
+                    m.Write(BitConverter.GetBytes((ushort)0), 0, 2);
+
+                    m.WriteByte(0);
+                    m.WriteByte(0);
+                    m.WriteByte(0);
+                    m.WriteByte(0); // alignment padding before accessory u2 array
 
                     var orderedAccessoryStatus = AccessoryStatus.OrderBy(x => x.Slot);
 
@@ -315,7 +337,7 @@ namespace DigitalWorldOnline.Commons.Models.Base
                         m.Write(BitConverter.GetBytes(accessoryStatus.Value), 0, 2);
                     }
 
-                    m.Write(BitConverter.GetBytes(0), 0, 2);
+                    m.Write(BitConverter.GetBytes((ushort)0), 0, 2); // alignment padding before u4
 
                     // Gift box expiration: derive directly from EndDate so non-temporary
                     // items (most gifts — XP boosts and time-limited items are the
@@ -334,7 +356,9 @@ namespace DigitalWorldOnline.Commons.Models.Base
                         giftRemainingMin = 0xFFFFFFFF;
                     }
                     m.Write(BitConverter.GetBytes(giftRemainingMin), 0, 4);
-                    m.Write(BitConverter.GetBytes(0), 0, 4);
+                    m.Write(BitConverter.GetBytes(0), 0, 4); // m_nRemainTradeLimitTime
+                    m.Write(BitConverter.GetBytes(0), 0, 4); // ExtraBytes low
+                    m.Write(BitConverter.GetBytes(0), 0, 4); // ExtraBytes high
                 }
 
                 return m.ToArray();

@@ -2,6 +2,27 @@
 
 Notable patches applied during the v487-client compatibility work. Grouped by area, not strictly chronological.
 
+## 2026-05-13 — Stability pass, item/storage cutover hardening, and DB refresh
+
+- **Owner-storage item persistence hardening**
+  - Completed major server-side cutover paths for inventory/warehouse/account-shared storage behavior on the normalized owner-keyed model.
+  - Fixed multiple packet/runtime gaps across login flow, map transition, storage movement, and item update paths that were still touching legacy assumptions.
+
+- **Item craft (`pItem::Make`) packet alignment fix**
+  - Corrected request parsing to client wire contract:
+    - `npcId (n4)`, `makeIdx (n4)`, `count (u2)`, `rateItem (n4)`, `protectItem (n4)`.
+  - Removed temporary deep craft debug logging after validation.
+
+- **Map static DB retirement (safe subset)**
+  - Dropped map static tables now served by map bins:
+    - `Asset_Map`
+    - `Asset_Portal`
+    - `Asset_MapRegionList`
+    - `Asset_MapRegion`
+
+- **Database snapshot refresh**
+  - Regenerated `db/dso.sql` from live local MariaDB after the map-table cleanup, so repo snapshot matches current schema/data baseline.
+
 ## Map bins migrated to Game.Host static-data path (MapList/Portal/Region/MonsterList)
 
 Map-related static catalogs are now fully bin-driven in Game.Host, replacing DB-backed static queries for map metadata, portals, regions, and mob spawn layout.
